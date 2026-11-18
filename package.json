@@ -1,0 +1,29 @@
+{
+  "name": "repairproof",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Evidence-Based Repair Verification and Intelligence Infrastructure",
+  "scripts": {
+    "dev": "pnpm --parallel -r run dev",
+    "dev:api": "pnpm --filter @repairproof/api run dev",
+    "dev:web": "pnpm --filter @repairproof/web run dev",
+    "build": "pnpm -r run build",
+    "build:api": "pnpm --filter @repairproof/api run build",
+    "build:web": "pnpm --filter @repairproof/web run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "test:api": "pnpm --filter @repairproof/api run test",
+    "test:web": "pnpm --filter @repairproof/web run test",
+    "db:generate": "pnpm --filter @repairproof/api run db:generate",
+    "db:migrate": "pnpm --filter @repairproof/api run db:migrate",
+    "db:push": "pnpm --filter @repairproof/api run db:push",
+    "db:studio": "pnpm --filter @repairproof/api run db:studio",
+    "clean": "pnpm -r exec rm -rf node_modules dist .turbo"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@10.19.0"
+}

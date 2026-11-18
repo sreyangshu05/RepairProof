@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  TECHNICIAN
+  SHOP_OWNER
+}
+
+enum DeviceCategory {
+  SMARTPHONE
+  LAPTOP
+}
+
+enum CaseStatus {
+  REGISTERED
+  DIAGNOSING
+  QUOTED
+  AWAITING_APPROVAL
+  APPROVED
+  REJECTED
+  IN_REPAIR
+  VERIFYING
+  CERTIFIED
+  CANCELLED
+}
+
+enum CasePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum EvidenceType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+}
+
+enum EvidenceCategory {
+  INTAKE
+  DIAGNOSTIC
+  DURING_REPAIR
+  POST_REPAIR
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum QuotationItemType {
+  PART
+  LABOR
+}
+
+enum PartSource {
+  OEM
+  AFTERMARKET
+  REFURBISHED
+  CUSTOMER_PROVIDED
+}
+
+enum RepairStepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+model Profile {
+  id          String   @id @default(uuid())
+  userId      String   @unique // Supabase Auth User ID (auth.users)
+  role        UserRole @default(TECHNICIAN)
+  shopId      String?
+  displayName String
+  phone       String?
+  email       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  shop            Shop?          @relation(fields: [shopId], references: [id])
+  repairCases     RepairCase[]   @relation("AssignedTechnician")
+  evidenceCaptured Evidence[]    @relation("EvidenceAuthor")
+  verifications   Verification[] @relation("VerifiedBy")
+  certificates    Certificate[]  @relation("CertificateIssuer")
+
+  @@index([shopId])
+  @@index([userId])
+}
+
+model Shop {
+  id        String   @id @default(uuid())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  logoUrl   String?
+  ownerId   String   // Foreign key to auth.users / Profile
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  profiles    Profile[]
+  devices     Device[]
+  repairCases RepairCase[]
+
+  @@index([ownerId])
+}
+
+model Device {
+  id              String         @id @default(uuid())
+  shopId          String
+  registeredById  String
+  category        DeviceCategory
+  make            String
+  model           String
+  serialNumber    String?
+  imei            String?
+  color           String?
+  storageCapacity String?
+  intakePhotos    String[]       @default([])
+  intakeCondition String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+
+  shop        Shop         @relation(fields: [shopId], references: [id])
+  repairCases RepairCase[]
+
+  @@index([shopId])
+  @@index([serialNumber])
+  @@index([imei])
+}
+
+model RepairCase {
+  id                     String       @id @default(uuid())
+  caseNumber             String       @unique
+  deviceId               String
+  shopId                 String
+  technicianId           String?
+  status                 CaseStatus   @default(REGISTERED)
+  priority               CasePriority @default(NORMAL)
+  customerName           String
+  customerPhone          String
+  customerEmail          String?
+  problemDescription     String
+  authorizationToken     String       @unique
+  authorizationExpiresAt DateTime
+  estimatedCompletionAt DateTime?
+  closedAt               DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  deletedAt              DateTime?
+
+  device       Device        @relation(fields: [deviceId], references: [id])
+  shop         Shop          @relation(fields: [shopId], references: [id])
+  technician   Profile?      @relation("AssignedTechnician", fields: [technicianId], references: [id])
+  evidence     Evidence[]
+  quotations   Quotation[]
+  steps        RepairStep[]
+  verification Verification?
+  certificate  Certificate?
+
+  @@index([shopId])
+  @@index([deviceId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([authorizationToken])
+}
+
+model Evidence {
+  id           String           @id @default(uuid())
+  caseId       String
+  capturedById String
+  type         EvidenceType     @default(PHOTO)
+  category     EvidenceCategory
+  fileUrl      String
+  thumbnailUrl String?
+  fileName     String
+  fileSize     Int
+  mimeType     String
+  description  String?
+  capturedAt   DateTime         @default(now())
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+
+  repairCase  RepairCase           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  capturedBy  Profile              @relation("EvidenceAuthor", fields: [capturedById], references: [id])
+  annotations EvidenceAnnotation[]
+
+  @@index([caseId])
+  @@index([category])
+}
+
+model EvidenceAnnotation {
+  id         String   @id @default(uuid())
+  evidenceId String
+  x          Float    // Percentage (0.0 to 100.0)
+  y          Float    // Percentage (0.0 to 100.0)
+  note       String
+  authorName String?
+  createdAt  DateTime @default(now())
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+}
+
+model Quotation {
+  id                  String          @id @default(uuid())
+  caseId              String
+  version             Int             @default(1)
+  status              QuotationStatus @default(DRAFT)
+  laborCost           Decimal         @default(0.0) @db.Decimal(10, 2)
+  partsCost           Decimal         @default(0.0) @db.Decimal(10, 2)
+  taxAmount           Decimal         @default(0.0) @db.Decimal(10, 2)
+  totalCost           Decimal         @default(0.0) @db.Decimal(10, 2)
+  currency            String          @default("USD")
+  validUntil          DateTime
+  customerResponseNote String?
+  respondedAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+
+  repairCase RepairCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  items      QuotationItem[]
+
+  @@unique([caseId, version])
+  @@index([caseId])
+}
+
+model QuotationItem {
+  id          String            @id @default(uuid())
+  quotationId String
+  type        QuotationItemType
+  description String
+  partName    String?
+  partSource  PartSource?
+  quantity    Int               @default(1)
+  unitPrice   Decimal           @db.Decimal(10, 2)
+  totalPrice  Decimal           @db.Decimal(10, 2)
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId])
+}
+
+model RepairStep {
+  id            String           @id @default(uuid())
+  caseId        String
+  stepNumber    Int
+  title         String
+  description   String
+  status        RepairStepStatus @default(PENDING)
+  photos        String[]         @default([])
+  partsUsed     Json             @default("[]") // Array of { name, partNumber, source, cost }
+  performedById String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  deletedAt     DateTime?
+
+  repairCase RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, stepNumber])
+  @@index([caseId])
+}
+
+model Verification {
+  id           String   @id @default(uuid())
+  caseId       String   @unique
+  verifiedById String
+  passed       Boolean
+  notes        String?
+  checklist    Json     @default("[]") // Array of { id, label, category, passed, notes }
+  verifiedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repairCase RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  verifiedBy Profile    @relation("VerifiedBy", fields: [verifiedById], references: [id])
+
+  @@index([caseId])
+}
+
+model Certificate {
+  id                  String   @id @default(uuid())
+  caseId              String   @unique
+  certificateNumber   String   @unique
+  qrCodeUrl           String
+  verificationUrl     String
+  pdfUrl              String?
+  warrantyPeriodMonths Int     @default(3)
+  warrantyTerms       String?
+  issuedAt            DateTime @default(now())
+  issuedById          String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  repairCase RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  issuedBy   Profile    @relation("CertificateIssuer", fields: [issuedById], references: [id])
+
+  @@index([certificateNumber])
+}
