@@ -1,7 +1,7 @@
 # RepairProof Proprietary Software License
 
 **Version:** 1.0  
-**Effective date:** 25 November 2026
+**Effective date:** 27 November 2026
 
 Copyright © 2026 RepairProof and the respective authors or rights holders of the materials in this repository. All rights reserved, subject to the ownership and third-party notices stated below.
 
