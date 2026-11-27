@@ -42,7 +42,7 @@ RUN client_package="$(find /app/node_modules/.pnpm -path '*/node_modules/@prisma
 RUN chown -R repairproof:repairproof /app
 
 USER repairproof
-EXPOSE 3001
+EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const http=require('node:http'),port=process.env.PORT||process.env.API_PORT||3001,req=http.get({host:'127.0.0.1',port,path:'/health/live',timeout:4000},res=>process.exit(res.statusCode>=200&&res.statusCode<400?0:1));req.on('error',()=>process.exit(1));req.on('timeout',()=>{req.destroy();process.exit(1)})"
 CMD ["node", "apps/api/dist/src/main.js"]

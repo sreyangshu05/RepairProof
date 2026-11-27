@@ -90,7 +90,7 @@ async function bootstrap() {
   // Render and other managed web hosts provide PORT at runtime. Keep API_PORT
   // as the local/container override for the existing Docker topology.
   const port = process.env.PORT || process.env.API_PORT || 3001;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   structuredLogger.log(`RepairProof API is listening on port ${port}`, 'Bootstrap');
   structuredLogger.log(
     `API Documentation available at http://localhost:${port}/api/docs`,

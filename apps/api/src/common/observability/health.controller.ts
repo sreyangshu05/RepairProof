@@ -1,4 +1,14 @@
-import { Controller, Get, Header, HttpException, HttpStatus, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  HttpException,
+  HttpStatus,
+  Req,
+  Res,
+  Version,
+  VERSION_NEUTRAL,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Public } from '../decorators/public.decorator';
@@ -17,12 +27,14 @@ export class HealthController {
   ) {}
 
   @Public()
+  @Version(VERSION_NEUTRAL)
   @Get('live')
   liveness() {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
   @Public()
+  @Version(VERSION_NEUTRAL)
   @Get('ready')
   async readiness() {
     const checks: Record<string, 'ok' | 'unavailable' | 'optional'> = {
@@ -64,6 +76,7 @@ export class HealthController {
   }
 
   @Public()
+  @Version(VERSION_NEUTRAL)
   @Get('metrics')
   @Header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
   async metricsEndpoint(@Req() request: Request, @Res() response: Response) {
