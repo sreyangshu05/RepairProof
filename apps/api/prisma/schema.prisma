@@ -11,6 +11,55 @@ datasource db {
 enum UserRole {
   TECHNICIAN
   SHOP_OWNER
+  PLATFORM_ADMIN
+}
+
+enum AnalyticsConsentDecision {
+  GRANTED
+  WITHDRAWN
+}
+
+enum AnalyticsConsentPurpose {
+  PRODUCT_ANALYTICS
+}
+
+enum FeatureFlagRolloutScope {
+  PROFILE
+  ORGANIZATION
+}
+
+enum FeatureExperimentStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
+enum OrganizationRole {
+  TECHNICIAN
+  SHOP_OWNER
+}
+
+enum OrganizationVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum NotificationEmailStatus {
+  NOT_QUEUED
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+}
+
+enum NotificationCategory {
+  CASE_UPDATES
+  QUOTATIONS
+  DIAGNOSTICS
+  WARRANTIES
+  DISPUTES
 }
 
 enum DeviceCategory {
@@ -19,15 +68,18 @@ enum DeviceCategory {
 }
 
 enum CaseStatus {
-  REGISTERED
-  DIAGNOSING
-  QUOTED
-  AWAITING_APPROVAL
+  DRAFT
+  SUBMITTED
+  UNDER_DIAGNOSIS
+  DIAGNOSIS_COMPLETED
+  QUOTATION_PENDING
+  AWAITING_CUSTOMER_APPROVAL
   APPROVED
   REJECTED
   IN_REPAIR
-  VERIFYING
-  CERTIFIED
+  AWAITING_VERIFICATION
+  COMPLETED
+  DISPUTED
   CANCELLED
 }
 
@@ -51,6 +103,36 @@ enum EvidenceCategory {
   POST_REPAIR
 }
 
+enum EvidencePurpose {
+  PHOTOGRAPH
+  INVOICE
+  DIAGNOSTIC_REPORT
+  COMPONENT_DOCUMENTATION
+  TEST_RESULT
+  REPAIR_COMPLETION
+  OTHER
+}
+
+enum EvidenceAssetRole {
+  ORIGINAL
+  THUMBNAIL
+  PROCESSED
+}
+
+enum EvidenceMalwareStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  NOT_SCANNED
+}
+
+enum EvidenceUploadStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+  EXPIRED
+}
+
 enum QuotationStatus {
   DRAFT
   SENT
@@ -64,11 +146,29 @@ enum QuotationItemType {
   LABOR
 }
 
+enum QuotationChangeRequestStatus {
+  OPEN
+  RESOLVED
+}
+
 enum PartSource {
   OEM
   AFTERMARKET
   REFURBISHED
   CUSTOMER_PROVIDED
+}
+
+enum PriceObservationStatus {
+  PENDING_REVIEW
+  ACCEPTED
+  REJECTED
+}
+
+enum RepairComplexity {
+  LOW
+  MEDIUM
+  HIGH
+  VERY_HIGH
 }
 
 enum RepairStepStatus {
@@ -78,43 +178,121 @@ enum RepairStepStatus {
   SKIPPED
 }
 
+enum DiagnosticStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum WarrantyStatus {
+  ACTIVE
+  EXPIRED
+  VOID
+}
+
+enum WarrantyClaimStatus {
+  OPEN
+  REVIEWING
+  APPROVED
+  REJECTED
+  RESOLVED
+}
+
+enum DisputeStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  REJECTED
+}
+
 model Profile {
-  id          String   @id @default(uuid())
-  userId      String   @unique // Supabase Auth User ID (auth.users)
-  role        UserRole @default(TECHNICIAN)
+  id          String    @id @default(uuid())
+  userId      String    @unique // Supabase Auth User ID (auth.users)
+  role        UserRole  @default(TECHNICIAN)
   shopId      String?
   displayName String
   phone       String?
   email       String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  locale      String    @default("en-IN")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
+  isActive    Boolean   @default(true)
 
-  shop            Shop?          @relation(fields: [shopId], references: [id])
-  repairCases     RepairCase[]   @relation("AssignedTechnician")
-  evidenceCaptured Evidence[]    @relation("EvidenceAuthor")
-  verifications   Verification[] @relation("VerifiedBy")
-  certificates    Certificate[]  @relation("CertificateIssuer")
+  shop                     Shop?                     @relation(fields: [shopId], references: [id])
+  repairCases              RepairCase[]              @relation("AssignedTechnician")
+  evidenceCaptured         Evidence[]                @relation("EvidenceAuthor")
+  evidenceUploadIntents    EvidenceUploadIntent[]    @relation("EvidenceUploader")
+  evidenceDeletionRequests EvidenceDeletionRequest[] @relation("EvidenceDeletionRequester")
+  evidenceDeletionReviews  EvidenceDeletionRequest[] @relation("EvidenceDeletionReviewer")
+  verifications            Verification[]            @relation("VerifiedBy")
+  verificationAttempts     VerificationAttempt[]     @relation("VerificationAttemptAuthor")
+  certificates             Certificate[]             @relation("CertificateIssuer")
+  memberships              OrganizationMembership[]
+  diagnostics              Diagnostic[]              @relation("DiagnosticAuthor")
+  componentReplacements    ComponentReplacement[]    @relation("ReplacementAuthor")
+  testResults              TestResult[]              @relation("TestAuthor")
+  notifications            Notification[]
+  notificationPreferences  NotificationPreference[]
+  auditEvents              AuditEvent[]
+  openedDisputes           Dispute[]                 @relation("DisputeOpener")
+  platformAdminRecord      PlatformAdmin?            @relation("PlatformAdminSubject")
+  platformAdminGrants      PlatformAdmin[]           @relation("PlatformAdminGrantor")
+  verifiedOrganizations    Shop[]                    @relation("OrganizationVerifier")
+  platformAuditEvents      PlatformAdminAuditEvent[] @relation("PlatformAdminAction")
+  repairCaseTransitions    RepairCaseTransition[]    @relation("RepairTransitionActor")
+  priceObservationsEntered RepairPriceTransaction[]  @relation("PriceObservationAuthor")
+  priceObservationsReviewed RepairPriceTransaction[] @relation("PriceObservationReviewer")
+  diagnosticConsistencyAssessments DiagnosticConsistencyAssessment[]
+  analyticsConsents                    AnalyticsConsent[]
 
   @@index([shopId])
   @@index([userId])
 }
 
+model AuthCredential {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+}
+
 model Shop {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   name      String
   address   String?
   phone     String?
   email     String?
   logoUrl   String?
-  ownerId   String   // Foreign key to auth.users / Profile
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  ownerId   String // Foreign key to auth.users / Profile
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  profiles    Profile[]
-  devices     Device[]
-  repairCases RepairCase[]
+  profiles              Profile[]
+  devices               Device[]
+  repairCases           RepairCase[]
+  evidenceUploadIntents EvidenceUploadIntent[]
+  memberships           OrganizationMembership[]
+  components            Component[]
+  auditEvents           AuditEvent[]
+  verificationStatus    OrganizationVerificationStatus @default(PENDING)
+  verifiedAt            DateTime?
+  verificationNotes     String?
+  verifiedById          String?
+  verifiedBy            Profile?                       @relation("OrganizationVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  repairPriceTransactions RepairPriceTransaction[]
+  diagnosticConsistencyAssessments DiagnosticConsistencyAssessment[]
 
   @@index([ownerId])
 }
@@ -150,66 +328,159 @@ model RepairCase {
   deviceId               String
   shopId                 String
   technicianId           String?
-  status                 CaseStatus   @default(REGISTERED)
+  status                 CaseStatus   @default(DRAFT)
   priority               CasePriority @default(NORMAL)
   customerName           String
   customerPhone          String
   customerEmail          String?
+  customerLocale         String   @default("en-IN")
   problemDescription     String
   authorizationToken     String       @unique
   authorizationExpiresAt DateTime
-  estimatedCompletionAt DateTime?
+  estimatedCompletionAt  DateTime?
   closedAt               DateTime?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
   deletedAt              DateTime?
 
-  device       Device        @relation(fields: [deviceId], references: [id])
-  shop         Shop          @relation(fields: [shopId], references: [id])
-  technician   Profile?      @relation("AssignedTechnician", fields: [technicianId], references: [id])
-  evidence     Evidence[]
-  quotations   Quotation[]
-  steps        RepairStep[]
-  verification Verification?
-  certificate  Certificate?
+  device                  Device                   @relation(fields: [deviceId], references: [id])
+  shop                    Shop                     @relation(fields: [shopId], references: [id])
+  technician              Profile?                 @relation("AssignedTechnician", fields: [technicianId], references: [id])
+  evidence                Evidence[]
+  evidenceUploadIntents   EvidenceUploadIntent[]
+  quotations              Quotation[]
+  steps                   RepairStep[]
+  verification            Verification?
+  verificationAttempts    VerificationAttempt[]
+  certificate             Certificate?
+  diagnostics             Diagnostic[]
+  replacements            ComponentReplacement[]
+  testResults             TestResult[]
+  warranty                Warranty?
+  disputes                Dispute[]
+  lifecycleTransitions    RepairCaseTransition[]
+  quotationChangeRequests QuotationChangeRequest[]
+  priceTransaction        RepairPriceTransaction?
+  diagnosticAssessments   DiagnosticConsistencyAssessment[]
 
   @@index([shopId])
   @@index([deviceId])
   @@index([technicianId])
   @@index([status])
   @@index([authorizationToken])
+  @@unique([id, shopId], map: "RepairCase_id_shopId_price_fk_key")
 }
 
 model Evidence {
-  id           String           @id @default(uuid())
-  caseId       String
-  capturedById String
-  type         EvidenceType     @default(PHOTO)
-  category     EvidenceCategory
-  fileUrl      String
-  thumbnailUrl String?
-  fileName     String
-  fileSize     Int
-  mimeType     String
-  description  String?
-  capturedAt   DateTime         @default(now())
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  deletedAt    DateTime?
+  id                        String                @id @default(uuid())
+  caseId                    String
+  capturedById              String
+  type                      EvidenceType          @default(PHOTO)
+  category                  EvidenceCategory
+  purpose                   EvidencePurpose       @default(OTHER)
+  assetRole                 EvidenceAssetRole     @default(ORIGINAL)
+  fileUrl                   String?
+  thumbnailUrl              String?
+  legacySourceUrl           String?
+  legacyThumbnailUrl        String?
+  fileName                  String
+  fileSize                  Int
+  mimeType                  String
+  verifiedMimeType          String?
+  storagePath               String?               @unique
+  contentSha256             String?               @db.Char(64)
+  malwareStatus             EvidenceMalwareStatus @default(NOT_SCANNED)
+  malwareScannedAt          DateTime?
+  malwareSignature          String?
+  retentionUntil            DateTime?
+  derivedFromId             String?
+  legacyUnverified          Boolean               @default(true)
+  truthfulContentAttestedAt DateTime?
+  integrityStatement        String?
+  description               String?
+  capturedAt                DateTime              @default(now())
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  deletedAt                 DateTime?
+  storageDeletionPending    Boolean               @default(false)
 
-  repairCase  RepairCase           @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  capturedBy  Profile              @relation("EvidenceAuthor", fields: [capturedById], references: [id])
-  annotations EvidenceAnnotation[]
+  repairCase         RepairCase                @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  capturedBy         Profile                   @relation("EvidenceAuthor", fields: [capturedById], references: [id])
+  annotations        EvidenceAnnotation[]
+  quotationEvidence  QuotationEvidence[]
+  replacementRecords ComponentReplacement[]    @relation("ReplacementEvidence")
+  testResultRecords  TestResult[]              @relation("TestResultEvidence")
+  uploadIntent       EvidenceUploadIntent?     @relation("EvidenceUploadResult")
+  deletionRequests   EvidenceDeletionRequest[]
+  derivedFrom        Evidence?                 @relation("EvidenceDerivatives", fields: [derivedFromId], references: [id], onDelete: Restrict)
+  derivatives        Evidence[]                @relation("EvidenceDerivatives")
+  priceTransactions  RepairPriceTransaction[]  @relation("PriceTransactionInvoice")
 
   @@index([caseId])
   @@index([category])
+  @@index([purpose, createdAt])
+  @@index([malwareStatus, retentionUntil])
+  @@index([storageDeletionPending, retentionUntil])
+  @@index([derivedFromId])
+  @@unique([id, caseId], map: "Evidence_id_caseId_price_fk_key")
+}
+
+model EvidenceUploadIntent {
+  id             String                @id @default(uuid())
+  caseId         String
+  shopId         String
+  uploadedById   String
+  objectPath     String                @unique
+  originalName   String
+  declaredMime   String
+  expectedBytes  Int
+  category       EvidenceCategory
+  purpose        EvidencePurpose
+  description    String?
+  idempotencyKey String
+  requestHash    String
+  status         EvidenceUploadStatus  @default(PENDING)
+  storageDeletionPending Boolean       @default(false)
+  scanStatus     EvidenceMalwareStatus @default(PENDING)
+  scanSignature  String?
+  expiresAt      DateTime
+  completedAt    DateTime?
+  evidenceId     String?               @unique
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  repairCase     RepairCase            @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  shop           Shop                  @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  uploadedBy     Profile               @relation("EvidenceUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  evidence       Evidence?             @relation("EvidenceUploadResult", fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, idempotencyKey])
+  @@index([shopId, caseId, status, createdAt])
+  @@index([status, expiresAt])
+  @@index([storageDeletionPending, status])
+}
+
+model EvidenceDeletionRequest {
+  id            String    @id @default(uuid())
+  evidenceId    String
+  requestedById String
+  reviewedById  String?
+  reason        String
+  status        String    @default("PENDING")
+  requestedAt   DateTime  @default(now())
+  reviewedAt    DateTime?
+  completedAt   DateTime?
+  evidence      Evidence  @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+  requestedBy   Profile   @relation("EvidenceDeletionRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy    Profile?  @relation("EvidenceDeletionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@index([evidenceId, status, requestedAt])
 }
 
 model EvidenceAnnotation {
   id         String   @id @default(uuid())
   evidenceId String
-  x          Float    // Percentage (0.0 to 100.0)
-  y          Float    // Percentage (0.0 to 100.0)
+  x          Float // Percentage (0.0 to 100.0)
+  y          Float // Percentage (0.0 to 100.0)
   note       String
   authorName String?
   createdAt  DateTime @default(now())
@@ -220,27 +491,69 @@ model EvidenceAnnotation {
 }
 
 model Quotation {
-  id                  String          @id @default(uuid())
-  caseId              String
-  version             Int             @default(1)
-  status              QuotationStatus @default(DRAFT)
-  laborCost           Decimal         @default(0.0) @db.Decimal(10, 2)
-  partsCost           Decimal         @default(0.0) @db.Decimal(10, 2)
-  taxAmount           Decimal         @default(0.0) @db.Decimal(10, 2)
-  totalCost           Decimal         @default(0.0) @db.Decimal(10, 2)
-  currency            String          @default("USD")
-  validUntil          DateTime
-  customerResponseNote String?
-  respondedAt         DateTime?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  deletedAt           DateTime?
+  id                       String          @id @default(uuid())
+  caseId                   String
+  version                  Int             @default(1)
+  status                   QuotationStatus @default(DRAFT)
+  laborCost                Decimal         @default(0.0) @db.Decimal(10, 2)
+  partsCost                Decimal         @default(0.0) @db.Decimal(10, 2)
+  taxAmount                Decimal         @default(0.0) @db.Decimal(10, 2)
+  totalCost                Decimal         @default(0.0) @db.Decimal(10, 2)
+  diagnosedIssue           String          @db.Text
+  proposedRepair           String          @db.Text
+  additionalCharges        Decimal         @default(0.0) @db.Decimal(10, 2)
+  taxRate                  Decimal         @default(0.0) @db.Decimal(5, 4)
+  estimatedCompletionHours Int
+  warrantyTerms            String          @db.Text
+  currency                 String          @default("USD")
+  validUntil               DateTime
+  customerResponseNote     String?
+  respondedAt              DateTime?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  deletedAt                DateTime?
 
-  repairCase RepairCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  items      QuotationItem[]
+  repairCase                   RepairCase               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  items                        QuotationItem[]
+  approval                     Approval?
+  evidence                     QuotationEvidence[]
+  changeRequests               QuotationChangeRequest[] @relation("RequestedQuotation")
+  replacementForChangeRequests QuotationChangeRequest[] @relation("ReplacementQuotation")
 
   @@unique([caseId, version])
   @@index([caseId])
+}
+
+model QuotationEvidence {
+  quotationId String
+  evidenceId  String
+  attachedAt  DateTime  @default(now())
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+  evidence    Evidence  @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@id([quotationId, evidenceId])
+  @@index([evidenceId])
+}
+
+model QuotationChangeRequest {
+  id                     String                       @id @default(uuid())
+  caseId                 String
+  quotationId            String
+  replacementQuotationId String?
+  customerSignatureName  String
+  requestText            String                       @db.Text
+  status                 QuotationChangeRequestStatus @default(OPEN)
+  idempotencyKey         String
+  requestHash            String
+  createdAt              DateTime                     @default(now())
+  resolvedAt             DateTime?
+  repairCase             RepairCase                   @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  quotation              Quotation                    @relation("RequestedQuotation", fields: [quotationId], references: [id], onDelete: Restrict)
+  replacementQuotation   Quotation?                   @relation("ReplacementQuotation", fields: [replacementQuotationId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, idempotencyKey])
+  @@index([caseId, status, createdAt])
+  @@index([quotationId, createdAt])
 }
 
 model QuotationItem {
@@ -260,24 +573,27 @@ model QuotationItem {
 }
 
 model RepairStep {
-  id            String           @id @default(uuid())
-  caseId        String
-  stepNumber    Int
-  title         String
-  description   String
-  status        RepairStepStatus @default(PENDING)
-  photos        String[]         @default([])
-  partsUsed     Json             @default("[]") // Array of { name, partNumber, source, cost }
-  performedById String?
-  startedAt     DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  deletedAt     DateTime?
+  id             String           @id @default(uuid())
+  caseId         String
+  stepNumber     Int
+  title          String
+  description    String
+  status         RepairStepStatus @default(PENDING)
+  photos         String[]         @default([])
+  partsUsed      Json             @default("[]") // Array of { name, partNumber, source, cost }
+  performedById  String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deletedAt      DateTime?
+  idempotencyKey String?
+  requestHash    String?
 
   repairCase RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@unique([caseId, stepNumber])
+  @@unique([caseId, idempotencyKey])
   @@index([caseId])
 }
 
@@ -298,22 +614,495 @@ model Verification {
   @@index([caseId])
 }
 
+model VerificationAttempt {
+  id             String     @id @default(uuid())
+  caseId         String
+  verifiedById   String
+  passed         Boolean
+  notes          String?
+  checklist      Json       @default("[]")
+  idempotencyKey String     @unique
+  requestHash    String
+  verifiedAt     DateTime   @default(now())
+  repairCase     RepairCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  verifiedBy     Profile    @relation("VerificationAttemptAuthor", fields: [verifiedById], references: [id], onDelete: Restrict)
+
+  @@index([caseId, verifiedAt])
+}
+
 model Certificate {
-  id                  String   @id @default(uuid())
-  caseId              String   @unique
-  certificateNumber   String   @unique
-  qrCodeUrl           String
-  verificationUrl     String
-  pdfUrl              String?
-  warrantyPeriodMonths Int     @default(3)
-  warrantyTerms       String?
-  issuedAt            DateTime @default(now())
-  issuedById          String
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  caseId               String   @unique
+  certificateNumber    String   @unique
+  qrCodeUrl            String
+  verificationUrl      String
+  pdfUrl               String?
+  warrantyPeriodMonths Int      @default(3)
+  warrantyTerms        String?
+  issuedAt             DateTime @default(now())
+  issuedById           String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   repairCase RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
   issuedBy   Profile    @relation("CertificateIssuer", fields: [issuedById], references: [id])
+  warranty   Warranty?
 
   @@index([certificateNumber])
+}
+
+model OrganizationMembership {
+  id        String           @id @default(uuid())
+  shopId    String
+  profileId String
+  role      OrganizationRole @default(TECHNICIAN)
+  joinedAt  DateTime         @default(now())
+  revokedAt DateTime?
+  shop      Shop             @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  profile   Profile          @relation(fields: [profileId], references: [id], onDelete: Restrict)
+
+  @@unique([shopId, profileId])
+  @@index([profileId, revokedAt])
+}
+
+model Diagnostic {
+  id          String           @id @default(uuid())
+  caseId      String
+  authorId    String
+  status      DiagnosticStatus @default(DRAFT)
+  findings    Json
+  severity    String?
+  submittedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  repairCase  RepairCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author      Profile          @relation("DiagnosticAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt])
+}
+
+model Approval {
+  id                     String         @id @default(uuid())
+  quotationId            String         @unique
+  status                 ApprovalStatus @default(PENDING)
+  customerSignatureName  String?
+  notes                  String?
+  respondedAt            DateTime?
+  decisionIdempotencyKey String?        @unique
+  decisionRequestHash    String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  quotation              Quotation      @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+model RepairCaseTransition {
+  id                String      @id @default(uuid())
+  caseId            String
+  fromState         CaseStatus?
+  toState           CaseStatus
+  actorProfileId    String?
+  actorRole         String
+  reason            String?
+  supportingRecords Json        @default("[]")
+  idempotencyKey    String?
+  requestHash       String?
+  createdAt         DateTime    @default(now())
+  repairCase        RepairCase  @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  actor             Profile?    @relation("RepairTransitionActor", fields: [actorProfileId], references: [id], onDelete: SetNull)
+
+  @@unique([caseId, idempotencyKey])
+  @@index([caseId, createdAt])
+  @@index([toState, createdAt])
+}
+
+model Component {
+  id               String                 @id @default(uuid())
+  shopId           String
+  sku              String?
+  name             String
+  manufacturer     String?
+  source           PartSource             @default(AFTERMARKET)
+  quantityOnHand   Int                    @default(0)
+  reorderThreshold Int                    @default(0)
+  unitCost         Decimal                @default(0) @db.Decimal(10, 2)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  deletedAt        DateTime?
+  shop             Shop                   @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  replacements     ComponentReplacement[]
+
+  @@unique([shopId, sku])
+  @@index([shopId, deletedAt])
+}
+
+model ComponentReplacement {
+  id           String     @id @default(uuid())
+  caseId       String
+  componentId  String?
+  authorId     String
+  nameSnapshot String
+  quantity     Int
+  unitCost     Decimal    @db.Decimal(10, 2)
+  source       PartSource
+  evidenceId   String?
+  evidenceIds  String[]   @default([])
+  replacedAt   DateTime   @default(now())
+  repairCase   RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  component    Component? @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  author       Profile    @relation("ReplacementAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  evidence     Evidence?  @relation("ReplacementEvidence", fields: [evidenceId], references: [id], onDelete: SetNull)
+
+  @@index([caseId, replacedAt])
+  @@index([evidenceId])
+  @@index([evidenceIds], type: Gin)
+}
+
+// Reported invoice-backed transaction. Acceptance means a human reviewed the
+// invoice/entered fields; it does not establish the underlying claim as truth.
+model RepairPriceTransaction {
+  id                     String                 @id @default(uuid())
+  caseId                 String                 @unique
+  shopId                 String
+  invoiceEvidenceId      String
+  idempotencyKey         String
+  requestHash            String                 @db.Char(64)
+  enteredByProfileId     String
+  reviewedByProfileId    String?
+  status                 PriceObservationStatus @default(PENDING_REVIEW)
+  transactionAt          DateTime
+  countryCode            String                 @db.Char(2)
+  regionCode             String                 @db.VarChar(80)
+  currency               String                 @db.Char(3)
+  deviceManufacturer     String                 @db.VarChar(120)
+  deviceManufacturerNorm String                 @db.VarChar(120)
+  deviceModel            String                 @db.VarChar(160)
+  deviceModelNorm        String                 @db.VarChar(160)
+  faultType              String                 @db.VarChar(120)
+  faultTypeNorm          String                 @db.VarChar(120)
+  complexity             RepairComplexity
+  labourAmount           Decimal                @db.Decimal(12, 2)
+  partsAmount            Decimal                @db.Decimal(12, 2)
+  additionalAmount       Decimal                @default(0) @db.Decimal(12, 2)
+  taxAmount              Decimal                @default(0) @db.Decimal(12, 2)
+  totalAmount            Decimal                @db.Decimal(12, 2)
+  rejectionReason        String?                @db.Text
+  reviewedAt             DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  repairCase             RepairCase             @relation(fields: [caseId, shopId], references: [id, shopId], onDelete: Restrict)
+  shop                   Shop                   @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  invoiceEvidence        Evidence               @relation("PriceTransactionInvoice", fields: [invoiceEvidenceId, caseId], references: [id, caseId], onDelete: Restrict)
+  enteredBy              Profile                @relation("PriceObservationAuthor", fields: [enteredByProfileId], references: [id], onDelete: Restrict)
+  reviewedBy             Profile?               @relation("PriceObservationReviewer", fields: [reviewedByProfileId], references: [id], onDelete: Restrict)
+  items                  RepairPriceTransactionItem[]
+
+  @@index([status, currency, countryCode, regionCode, transactionAt], map: "RepairPriceTransaction_cohort_idx")
+  @@index([status, deviceManufacturerNorm, deviceModelNorm, faultTypeNorm, complexity], map: "RepairPriceTransaction_device_fault_idx")
+  @@index([status, currency, countryCode, regionCode, deviceManufacturerNorm, deviceModelNorm, faultTypeNorm, complexity, transactionAt], map: "RepairPriceTransaction_benchmark_cohort_idx")
+  @@index([shopId, transactionAt])
+  @@index([invoiceEvidenceId])
+  @@unique([caseId, shopId])
+}
+
+model RepairPriceTransactionItem {
+  id                String                @id @default(uuid())
+  transactionId     String
+  componentName     String                @db.VarChar(160)
+  componentNameNorm String                @db.VarChar(160)
+  quantity          Int
+  unitAmount        Decimal               @db.Decimal(12, 2)
+  totalAmount       Decimal               @db.Decimal(12, 2)
+  source            PartSource
+  transaction       RepairPriceTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([componentNameNorm, source, transactionId], map: "RepairPriceTransactionItem_component_source_idx")
+}
+
+// Optional official CPI/price index. Keep each series consistent and never mix currencies.
+model RepairPriceIndex {
+  id          String   @id @default(uuid())
+  countryCode String   @db.Char(2)
+  regionCode  String   @db.VarChar(80)
+  currency    String   @db.Char(3)
+  period      DateTime @db.Date
+  indexValue  Decimal  @db.Decimal(12, 6)
+  sourceName  String   @db.VarChar(160)
+  sourceUrl   String?  @db.Text
+  importedAt  DateTime @default(now())
+
+  @@unique([countryCode, regionCode, currency, period])
+}
+
+model TestResult {
+  id          String     @id @default(uuid())
+  caseId      String
+  authorId    String
+  name        String
+  passed      Boolean
+  details     Json?
+  notes       String?
+  testedAt    DateTime   @default(now())
+  evidenceId  String?
+  evidenceIds String[]   @default([])
+  repairCase  RepairCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author      Profile    @relation("TestAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  evidence    Evidence?  @relation("TestResultEvidence", fields: [evidenceId], references: [id], onDelete: SetNull)
+
+  @@index([caseId, testedAt])
+  @@index([evidenceId])
+  @@index([evidenceIds], type: Gin)
+}
+
+model Warranty {
+  id            String          @id @default(uuid())
+  caseId        String          @unique
+  certificateId String?         @unique
+  status        WarrantyStatus  @default(ACTIVE)
+  startsAt      DateTime
+  endsAt        DateTime
+  terms         String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  repairCase    RepairCase      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  certificate   Certificate?    @relation(fields: [certificateId], references: [id], onDelete: SetNull)
+  claims        WarrantyClaim[]
+
+  @@index([status, endsAt])
+}
+
+model WarrantyClaim {
+  id          String              @id @default(uuid())
+  warrantyId  String
+  status      WarrantyClaimStatus @default(OPEN)
+  description String
+  resolution  String?
+  openedAt    DateTime            @default(now())
+  closedAt    DateTime?
+  warranty    Warranty            @relation(fields: [warrantyId], references: [id], onDelete: Restrict)
+
+  @@index([warrantyId, status])
+}
+
+model Notification {
+  id                 String                  @id @default(uuid())
+  profileId          String?
+  recipientEmail     String?
+  type               String
+  category           NotificationCategory      @default(CASE_UPDATES)
+  deduplicationKey   String?                   @unique
+  title              String
+  body               String
+  emailText          String?
+  payload            Json                    @default("{}")
+  inAppVisible       Boolean                 @default(true)
+  readAt             DateTime?
+  createdAt          DateTime                @default(now())
+  emailStatus        NotificationEmailStatus @default(NOT_QUEUED)
+  emailAttempts      Int                     @default(0)
+  emailNextAttemptAt DateTime?
+  emailLockedUntil   DateTime?
+  emailSentAt        DateTime?
+  emailLastError     String?
+  profile            Profile?                @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([profileId, readAt, createdAt])
+  @@index([emailStatus, emailNextAttemptAt, createdAt])
+  @@index([emailStatus, emailLockedUntil, createdAt])
+  @@index([category, createdAt])
+}
+
+model NotificationPreference {
+  id            String               @id @default(uuid())
+  profileId     String
+  category      NotificationCategory
+  inAppEnabled  Boolean              @default(true)
+  emailEnabled  Boolean              @default(true)
+  smsEnabled    Boolean              @default(false)
+  updatedAt     DateTime             @updatedAt
+  createdAt     DateTime             @default(now())
+  profile       Profile              @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, category])
+  @@index([profileId])
+}
+
+model PlatformAdmin {
+  id                 String    @id @default(uuid())
+  profileId          String    @unique
+  previousRole       UserRole
+  active             Boolean   @default(true)
+  reason             String
+  grantedAt          DateTime  @default(now())
+  revokedAt          DateTime?
+  grantedByProfileId String?
+  profile            Profile   @relation("PlatformAdminSubject", fields: [profileId], references: [id], onDelete: Restrict)
+  grantedBy          Profile?  @relation("PlatformAdminGrantor", fields: [grantedByProfileId], references: [id], onDelete: SetNull)
+
+  @@index([active, grantedAt])
+}
+
+model PlatformAdminAuditEvent {
+  id             String   @id @default(uuid())
+  actorProfileId String
+  action         String
+  targetType     String
+  targetId       String
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+  actor          Profile  @relation("PlatformAdminAction", fields: [actorProfileId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([targetType, targetId, createdAt])
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  shopId     String
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  actor      Profile? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model AnalyticsConsent {
+  id            String                   @id @default(uuid())
+  sequence      BigInt                   @unique @default(autoincrement())
+  profileId     String
+  purpose       AnalyticsConsentPurpose  @default(PRODUCT_ANALYTICS)
+  decision      AnalyticsConsentDecision
+  noticeVersion String                   @db.VarChar(40)
+  decidedAt     DateTime                 @default(now())
+  profile       Profile                  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, decidedAt])
+}
+
+model ProductAnalyticsEvent {
+  id             String   @id @default(uuid())
+  eventKey       String   @unique @db.Char(64)
+  actorKey       String?  @db.Char(64)
+  organizationKey String? @db.Char(64)
+  journeyKey     String?  @db.Char(64)
+  name           String   @db.VarChar(64)
+  role           String?  @db.VarChar(32)
+  properties     Json     @default("{}")
+  occurredAt     DateTime @db.Date
+  createdAt      DateTime @default(now())
+
+  @@index([name, occurredAt])
+  @@index([actorKey, occurredAt])
+  @@index([organizationKey, occurredAt])
+  @@index([journeyKey, occurredAt])
+}
+
+model FeatureFlag {
+  id                 String                 @id @default(uuid())
+  key                String                 @unique @db.VarChar(100)
+  description        String                 @db.VarChar(500)
+  enabled            Boolean                @default(false)
+  emergencyDisabled Boolean                @default(false)
+  rolloutPercentage Int                    @default(0)
+  rolloutScope       FeatureFlagRolloutScope @default(PROFILE)
+  allowedRoles       UserRole[]             @default([])
+  organizationIds    String[]               @default([])
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  experiment         FeatureExperiment?
+
+  @@index([enabled, emergencyDisabled])
+}
+
+model FeatureExperiment {
+  id                   String                  @id @default(uuid())
+  key                  String                  @unique @db.VarChar(100)
+  flagId               String                  @unique
+  status               FeatureExperimentStatus @default(DRAFT)
+  allocationPercentage Int                     @default(0)
+  assignmentScope      FeatureFlagRolloutScope  @default(PROFILE)
+  variants             Json                    @default("[]")
+  metricKeys           String[]                @default([])
+  startedAt            DateTime?
+  endedAt              DateTime?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  flag                 FeatureFlag             @relation(fields: [flagId], references: [id], onDelete: Restrict)
+  assignments          FeatureExperimentAssignment[]
+  metricEvents         FeatureExperimentMetricEvent[]
+
+  @@index([status, updatedAt])
+}
+
+model FeatureExperimentAssignment {
+  id           String           @id @default(uuid())
+  experimentId String
+  subjectKey   String           @db.Char(64)
+  variantKey   String           @db.VarChar(64)
+  assignedAt   DateTime         @default(now())
+  experiment   FeatureExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  metricEvents FeatureExperimentMetricEvent[]
+
+  @@unique([experimentId, subjectKey])
+  @@index([experimentId, variantKey])
+}
+
+model FeatureExperimentMetricEvent {
+  id           String                     @id @default(uuid())
+  experimentId String
+  assignmentId String
+  metricKey    String                     @db.VarChar(80)
+  sourceKey    String                     @db.Char(64)
+  occurredAt   DateTime                   @db.Date
+  createdAt    DateTime                   @default(now())
+  experiment   FeatureExperiment          @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  assignment   FeatureExperimentAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, metricKey, sourceKey])
+  @@index([experimentId, metricKey, occurredAt])
+}
+
+model DiagnosticConsistencyAssessment {
+  id                 String     @id @default(uuid())
+  caseId             String
+  shopId             String
+  requestedById      String?
+  engineVersion      String
+  inputSha256        String     @db.Char(64)
+  signal             String
+  result             Json
+  createdAt          DateTime   @default(now())
+  repairCase         RepairCase @relation(fields: [caseId, shopId], references: [id, shopId], onDelete: Cascade)
+  shop               Shop       @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  requestedBy        Profile?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+
+  @@index([shopId, createdAt])
+  @@index([caseId, createdAt])
+}
+
+model Dispute {
+  id             String        @id @default(uuid())
+  caseId         String
+  openedById     String?
+  status         DisputeStatus @default(OPEN)
+  reason         String
+  description    String
+  resolution     String?
+  openedAt       DateTime      @default(now())
+  resolvedAt     DateTime?
+  idempotencyKey String?
+  requestHash    String?
+  repairCase     RepairCase    @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  openedBy       Profile?      @relation("DisputeOpener", fields: [openedById], references: [id], onDelete: SetNull)
+
+  @@unique([caseId, idempotencyKey])
+  @@index([status, openedAt])
+  @@index([caseId, openedAt])
 }

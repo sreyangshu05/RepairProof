@@ -1,4 +1,13 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  ArrayMaxSize,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 import { DeviceCategory } from '@repairproof/shared';
 
 export class CreateDeviceDto {
@@ -7,18 +16,22 @@ export class CreateDeviceDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(80)
   make!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(120)
   model!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(80)
   serialNumber?: string;
 
   @IsString()
   @IsOptional()
+  @Matches(/^\d{15}$/)
   imei?: string;
 
   @IsString()
@@ -30,22 +43,26 @@ export class CreateDeviceDto {
   storageCapacity?: string;
 
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   @IsOptional()
   intakePhotos?: string[];
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(2000)
   intakeCondition!: string;
 }
 
 export class UpdateDeviceDto {
   @IsString()
   @IsOptional()
+  @MaxLength(80)
   serialNumber?: string;
 
   @IsString()
   @IsOptional()
+  @Matches(/^\d{15}$/)
   imei?: string;
 
   @IsString()

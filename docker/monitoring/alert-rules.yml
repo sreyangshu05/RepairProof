@@ -1,0 +1,57 @@
+groups:
+  - name: repairproof-api
+    rules:
+      - alert: RepairProofApiHigh5xxRate
+        expr: sum(rate(repairproof_http_request_duration_seconds_count{status_class="5xx",route!="/health/live",route!="/health/ready",route!="/health/metrics"}[5m])) / clamp_min(sum(rate(repairproof_http_request_duration_seconds_count{route!="/health/live",route!="/health/ready",route!="/health/metrics"}[5m])), 0.001) > 0.02
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: API server error rate exceeds 2% for 10 minutes
+      - alert: RepairProofApiLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(repairproof_http_request_duration_seconds_bucket{route!="/health/live",route!="/health/ready",route!="/health/metrics"}[10m]))) > 0.75
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: API p95 request latency exceeds 750 ms
+      - alert: RepairProofDatabaseUnavailable
+        expr: repairproof_dependency_up{dependency="postgres"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: PostgreSQL readiness probe is failing
+      - alert: RepairProofRedisUnavailable
+        expr: repairproof_dependency_up{dependency="redis"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: Shared Redis rate-limit storage is unavailable
+      - alert: RepairProofEvidenceStorageUnavailable
+        expr: repairproof_dependency_up{dependency="evidence_storage"} == 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: Evidence object storage health check is failing
+      - alert: RepairProofEmailQueueBacklog
+        expr: repairproof_notification_email_oldest_seconds > 900
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: Oldest queued notification email is older than 15 minutes
+      - alert: RepairProofWarrantyWorkerStale
+        expr: time() - repairproof_worker_last_success_timestamp_seconds{worker="warranty_expiration"} > 28800
+        for: 30m
+        labels: { severity: ticket }
+        annotations:
+          summary: Warranty expiration reminder sweep has not succeeded within 8 hours
+      - alert: RepairProofEvidenceRetentionWorkerStale
+        expr: time() - repairproof_worker_last_success_timestamp_seconds{worker="evidence_retention"} > 93600
+        for: 30m
+        labels: { severity: ticket }
+        annotations:
+          summary: Evidence retention sweep has not succeeded within 26 hours
+      - alert: RepairProofWorkerFailures
+        expr: repairproof_worker_last_failure_timestamp_seconds > repairproof_worker_last_success_timestamp_seconds
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: A background worker has failed more recently than its last successful run

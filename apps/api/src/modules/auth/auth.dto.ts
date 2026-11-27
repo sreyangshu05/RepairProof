@@ -1,4 +1,14 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsBoolean,
+  MinLength,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 import { UserRole } from '@repairproof/shared';
 
 export class SignUpDto {
@@ -6,24 +16,28 @@ export class SignUpDto {
   email!: string;
 
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
+  @MaxLength(128)
   password!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(120)
   displayName!: string;
-
-  @IsEnum(UserRole)
-  @IsOptional()
-  role?: UserRole;
 
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   shopName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(40)
   phone?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  analyticsConsent?: boolean;
 }
 
 export class LoginDto {
@@ -31,7 +45,24 @@ export class LoginDto {
   email!: string;
 
   @IsString()
+  @MaxLength(128)
   password!: string;
+}
+
+export class RequestEmailOtpDto {
+  @IsEmail()
+  @MaxLength(254)
+  email!: string;
+}
+
+export class VerifyEmailOtpDto {
+  @IsEmail()
+  @MaxLength(254)
+  email!: string;
+
+  @IsString()
+  @Matches(/^\d{6,10}$/)
+  token!: string;
 }
 
 export class SyncProfileDto {

@@ -3,10 +3,17 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheck, Lock, Mail, User, Building } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../stores/auth.store';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { getApiErrorMessage } from '../../lib/api';
 
 export const SignUpPage: React.FC = () => {
   const navigate = useNavigate();
@@ -31,8 +38,8 @@ export const SignUpPage: React.FC = () => {
       });
       await login(email, password);
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Registration failed');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Registration failed'));
     } finally {
       setIsSubmitting(false);
     }

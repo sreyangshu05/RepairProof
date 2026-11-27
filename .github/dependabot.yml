@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      pnpm-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /services/ai/invoice-intelligence
+    schedule:
+      interval: weekly
+    groups:
+      invoice-ai-dependencies:
+        patterns:
+          - "*"

@@ -1,35 +1,43 @@
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
-import { EvidenceCategory, EvidenceType } from '@repairproof/shared';
+import {
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  Matches,
+} from 'class-validator';
+import { EvidenceCategory, EvidencePurpose } from '@repairproof/shared';
 
-export class CreateEvidenceDto {
+export class CreateEvidenceUploadDto {
   @IsEnum(EvidenceCategory)
   category!: EvidenceCategory;
 
-  @IsEnum(EvidenceType)
+  @IsEnum(EvidencePurpose)
   @IsOptional()
-  type?: EvidenceType;
+  purpose?: EvidencePurpose;
 
   @IsString()
   @IsNotEmpty()
-  fileUrl!: string;
-
-  @IsString()
-  @IsOptional()
-  thumbnailUrl?: string;
-
-  @IsString()
-  @IsNotEmpty()
+  @MaxLength(255)
   fileName!: string;
 
-  @IsNumber()
+  @IsInt()
+  @Min(1)
+  @Max(104857600)
   fileSize!: number;
 
   @IsString()
   @IsNotEmpty()
+  @Matches(/^(image\/(jpeg|png|webp|heic)|video\/(mp4|quicktime)|application\/pdf)$/)
   mimeType!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   description?: string;
 }
 
@@ -46,9 +54,29 @@ export class AddAnnotationDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(1000)
   note!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   authorName?: string;
+}
+
+export class EvidenceDeletionRequestDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  reason!: string;
+}
+
+export class EvidenceDeletionReviewDto {
+  @IsString()
+  @Matches(/^(APPROVED|REJECTED)$/)
+  status!: 'APPROVED' | 'REJECTED';
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(1000)
+  reviewNotes?: string;
 }

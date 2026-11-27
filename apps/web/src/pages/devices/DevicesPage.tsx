@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Smartphone, Laptop, Search, Plus, Calendar, ShieldCheck } from 'lucide-react';
+import { Smartphone, Laptop, Search, Plus, Calendar } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -26,8 +26,7 @@ export const DevicesPage: React.FC = () => {
       (d.serialNumber && d.serialNumber.toLowerCase().includes(search.toLowerCase())) ||
       (d.imei && d.imei.toLowerCase().includes(search.toLowerCase()));
 
-    const matchesCategory =
-      selectedCategory === 'ALL' || d.category === selectedCategory;
+    const matchesCategory = selectedCategory === 'ALL' || d.category === selectedCategory;
 
     return matchesSearch && matchesCategory;
   });
@@ -67,7 +66,11 @@ export const DevicesPage: React.FC = () => {
               size="sm"
               onClick={() => setSelectedCategory(cat)}
             >
-              {cat === 'ALL' ? 'All' : cat === DeviceCategory.SMARTPHONE ? 'Smartphones' : 'Laptops'}
+              {cat === 'ALL'
+                ? 'All'
+                : cat === DeviceCategory.SMARTPHONE
+                  ? 'Smartphones'
+                  : 'Laptops'}
             </Button>
           ))}
         </div>
@@ -75,9 +78,7 @@ export const DevicesPage: React.FC = () => {
 
       {/* Devices Grid */}
       {isLoading ? (
-        <div className="py-12 text-center text-sm text-muted-foreground">
-          Loading devices...
-        </div>
+        <div className="py-12 text-center text-sm text-muted-foreground">Loading devices...</div>
       ) : filtered.length === 0 ? (
         <Card className="py-12 text-center">
           <CardContent className="space-y-3">
@@ -107,7 +108,11 @@ export const DevicesPage: React.FC = () => {
                         {d.make} {d.model}
                       </CardTitle>
                       <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                        {d.serialNumber ? `S/N: ${d.serialNumber}` : d.imei ? `IMEI: ${d.imei}` : 'Unindexed'}
+                        {d.serialNumber
+                          ? `S/N: ${d.serialNumber}`
+                          : d.imei
+                            ? `IMEI: ${d.imei}`
+                            : 'Unindexed'}
                       </p>
                     </div>
                   </div>

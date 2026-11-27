@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ClipboardList, Smartphone, Laptop, AlertCircle } from 'lucide-react';
-import { api } from '../../lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { ArrowLeft, AlertCircle } from 'lucide-react';
+import { apiGet, apiPost, getApiErrorMessage } from '../../lib/api';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -26,7 +32,7 @@ export const NewCasePage: React.FC = () => {
 
   const { data: devices = [], isLoading: isLoadingDevices } = useQuery<Device[]>({
     queryKey: ['devices'],
-    queryFn: () => api.get('/devices'),
+    queryFn: () => apiGet<Device[]>('/devices'),
   });
 
   const selectedDevice = devices.find((d) => d.id === deviceId);
@@ -46,7 +52,7 @@ export const NewCasePage: React.FC = () => {
     setError(null);
 
     try {
-      const newCase: any = await api.post('/cases', {
+      const newCase = await apiPost<{ id: string }>('/cases', {
         deviceId,
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim(),
@@ -56,8 +62,8 @@ export const NewCasePage: React.FC = () => {
       });
 
       navigate(`/cases/${newCase.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create repair case');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to create repair case'));
     } finally {
       setIsSubmitting(false);
     }
@@ -161,7 +167,9 @@ export const NewCasePage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="custEmail">Customer Email (For digital quote & certificate link)</Label>
+              <Label htmlFor="custEmail">
+                Customer Email (For digital quote & certificate link)
+              </Label>
               <Input
                 id="custEmail"
                 type="email"

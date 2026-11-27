@@ -1,29 +1,172 @@
-version: '3.8'
+name: repairproof-dev
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: repairproof
+      POSTGRES_USER: repairproof
+      POSTGRES_PASSWORD: repairproof_dev_only
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - repairproof-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repairproof -d repairproof"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+    networks: [backend]
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - repairproof-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [backend]
+
+  clamav:
+    image: clamav/clamav:1.4
+    volumes:
+      - repairproof-clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "echo PING | nc -w 2 127.0.0.1 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+    networks: [backend]
+
   api:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.api
-    ports:
-      - '3001:3001'
+      dockerfile: docker/Dockerfile.api.dev
+    working_dir: /workspace
+    command: ["sh", "-lc", "pnpm --filter @repairproof/api db:generate && pnpm --filter @repairproof/api db:migrate:deploy && pnpm --filter @repairproof/api dev"]
+    env_file:
+      - path: ../.env
+        required: false
     environment:
-      - NODE_ENV=production
-      - API_PORT=3001
-      - API_CORS_ORIGIN=http://localhost:5173
-      - DATABASE_URL=${DATABASE_URL}
-      - DIRECT_URL=${DIRECT_URL}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      NODE_ENV: development
+      API_PORT: 3001
+      API_TRUST_PROXY_HOPS: 0
+      API_CORS_ORIGIN: http://localhost:5173
+      DATABASE_URL: postgresql://repairproof:repairproof_dev_only@postgres:5432/repairproof?schema=public
+      DIRECT_URL: postgresql://repairproof:repairproof_dev_only@postgres:5432/repairproof?schema=public
+      REDIS_URL: redis://redis:6379
+      REQUIRE_REDIS_RATE_LIMIT: "true"
+      REDIS_POOL_SIZE: 4
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      EVIDENCE_STORAGE_DISABLED: "true"
+      VITE_API_URL: /api
+      PUBLIC_APP_URL: http://localhost:5173
+      CERTIFICATE_BASE_URL: http://localhost:5173
+      API_PROXY_TARGET: http://api:3001
+      DIAGNOSTIC_LLM_BASE_URL: http://ollama:11434
+    ports:
+      - "${API_PORT:-3001}:3001"
+    volumes:
+      - ..:/workspace
+      - repairproof-root-node-modules:/workspace/node_modules
+      - repairproof-api-node-modules:/workspace/apps/api/node_modules
+      - repairproof-shared-node-modules:/workspace/packages/shared/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+    networks: [frontend, backend]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     restart: unless-stopped
 
   web:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.web
+      dockerfile: docker/Dockerfile.web.dev
+    working_dir: /workspace
+    command: ["pnpm", "--filter", "@repairproof/web", "dev", "--host", "0.0.0.0"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      API_PROXY_TARGET: http://api:3001
+      VITE_API_URL: /api
+      VITE_SUPABASE_URL: ${SUPABASE_URL:-https://your-project.supabase.co}
+      VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-your-anon-key}
+      VITE_APP_URL: http://localhost:5173
+      VITE_ENABLE_DEMO_FIXTURES: ${VITE_ENABLE_DEMO_FIXTURES:-false}
     ports:
-      - '5173:80'
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - ..:/workspace
+      - repairproof-root-node-modules:/workspace/node_modules
+      - repairproof-web-node-modules:/workspace/apps/web/node_modules
+      - repairproof-shared-node-modules:/workspace/packages/shared/node_modules
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    networks: [frontend]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+
+  invoice-ai:
+    profiles: ["ai"]
+    build:
+      context: ..
+      dockerfile: services/ai/invoice-intelligence/Dockerfile
+    environment:
+      REPAIRPROOF_ENV: development
+      INVOICE_AI_INTERNAL_TOKEN: ${INVOICE_AI_INTERNAL_TOKEN:-local-development-only-invoice-token}
+      INVOICE_AI_SIGNING_SECRET: ${INVOICE_AI_SIGNING_SECRET:-local-development-only-signing-secret}
+      INVOICE_AI_MAX_DOCUMENT_BYTES: ${INVOICE_AI_MAX_DOCUMENT_BYTES:-10485760}
+      INVOICE_AI_MAX_PDF_PAGES: ${INVOICE_AI_MAX_PDF_PAGES:-5}
+      INVOICE_AI_MAX_CONCURRENT: ${INVOICE_AI_MAX_CONCURRENT:-2}
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 1g
+    cpus: 1.0
+    restart: unless-stopped
+    networks: [backend]
+
+volumes:
+  repairproof-postgres-data:
+  repairproof-redis-data:
+  repairproof-clamav-data:
+  repairproof-root-node-modules:
+  repairproof-api-node-modules:
+  repairproof-web-node-modules:
+  repairproof-shared-node-modules:
+
+networks:
+  frontend:
+  backend:
+    internal: true

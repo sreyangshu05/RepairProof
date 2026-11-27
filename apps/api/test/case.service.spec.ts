@@ -1,68 +1,183 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { CaseService } from '../src/modules/case/case.service';
 import { CaseStatus } from '@repairproof/shared';
+import { CaseService } from '../src/modules/case/case.service';
 
-describe('CaseService & Status Machine', () => {
-  let service: CaseService;
-  let mockPrisma: any;
-
-  beforeEach(() => {
-    mockPrisma = {
+describe('CaseService lifecycle endpoint', () => {
+  it('bounds case listing and returns an opaque next cursor without authorization tokens', async () => {
+    const prisma: any = {
       repairCase: {
-        findFirst: jest.fn(),
-        create: jest.fn(),
-        update: jest.fn(),
-      },
-      device: {
-        findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'case-1', authorizationToken: 'token-1' },
+          { id: 'case-2', authorizationToken: 'token-2' },
+        ]),
       },
     };
-
-    service = new CaseService(mockPrisma);
-  });
-
-  it('should reject invalid status transitions (e.g. REGISTERED directly to CERTIFIED)', async () => {
-    mockPrisma.repairCase.findFirst.mockResolvedValue({
-      id: 'case-123',
-      status: CaseStatus.REGISTERED,
-    });
-
-    await expect(
-      service.updateStatus('case-123', 'shop-1', {
-        status: CaseStatus.CERTIFIED,
-      }),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('should permit valid status transitions (e.g. REGISTERED to DIAGNOSING)', async () => {
-    mockPrisma.repairCase.findFirst.mockResolvedValue({
-      id: 'case-123',
-      status: CaseStatus.REGISTERED,
-    });
-
-    mockPrisma.repairCase.update.mockResolvedValue({
-      id: 'case-123',
-      status: CaseStatus.DIAGNOSING,
-    });
-
-    const result = await service.updateStatus('case-123', 'shop-1', {
-      status: CaseStatus.DIAGNOSING,
-    });
-
-    expect(result.status).toBe(CaseStatus.DIAGNOSING);
-    expect(mockPrisma.repairCase.update).toHaveBeenCalledWith(
+    const service = new CaseService(prisma, {} as any, {} as any);
+    const result = await service.findAll('shop-1', undefined, 'tech-1', 1);
+    expect(prisma.repairCase.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'case-123' },
-        data: expect.objectContaining({ status: CaseStatus.DIAGNOSING }),
+        where: { shopId: 'shop-1', deletedAt: null, technicianId: 'tech-1' },
+        take: 2,
       }),
     );
+    expect(result).toEqual({ items: [{ id: 'case-1' }], nextCursor: 'case-1' });
   });
 
-  it('should throw NotFoundException when case does not exist', async () => {
-    mockPrisma.repairCase.findFirst.mockResolvedValue(null);
+  it('creates intake device and repair case in one database transaction', async () => {
+    const now = new Date();
+    const tx: any = {
+      organizationMembership: { findFirst: jest.fn().mockResolvedValue({ id: 'member-1' }) },
+      device: { create: jest.fn().mockResolvedValue({ id: 'device-1' }) },
+      repairCase: {
+        create: jest.fn().mockResolvedValue({
+          id: 'case-1',
+          authorizationToken: 'private-bearer-token',
+          device: { id: 'device-1' },
+          technician: { id: 'tech-1' },
+          createdAt: now,
+        }),
+      },
+    };
+    const prisma: any = { $transaction: jest.fn((fn) => fn(tx)) };
+    const lifecycle: any = { initialize: jest.fn().mockResolvedValue(undefined) };
+    const service = new CaseService(prisma, lifecycle, {} as any);
+    const result = await service.createFromIntake('shop-1', 'tech-1', 'TECHNICIAN', {
+      category: 'SMARTPHONE',
+      make: 'Acme',
+      model: 'Phone 1',
+      serialLast4: '1234',
+      customerName: 'Customer',
+      customerPhone: '+15555550123',
+      problemDescription: 'The device will not charge.',
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.device.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ shopId: 'shop-1', registeredById: 'tech-1' }),
+      }),
+    );
+    expect(tx.repairCase.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ shopId: 'shop-1', deviceId: 'device-1' }),
+      }),
+    );
+    expect(lifecycle.initialize).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ caseId: 'case-1', supportingRecords: ['device-1'] }),
+    );
+    expect(result.id).toBe('case-1');
+    expect(result).not.toHaveProperty('authorizationToken');
+  });
 
-    await expect(
-      service.findOne('non-existent-case', 'shop-1'),
-    ).rejects.toThrow(NotFoundException);
+  it('delegates status changes to the shared guarded lifecycle and returns the case with history', async () => {
+    const tx: any = {
+      repairCase: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'case-1',
+          status: CaseStatus.SUBMITTED,
+          lifecycleTransitions: [],
+        }),
+      },
+    };
+    const prisma: any = { $transaction: jest.fn((fn) => fn(tx)) };
+    const lifecycle: any = {
+      hashRequest: jest.fn(() => 'request-hash'),
+      transition: jest.fn().mockResolvedValue({}),
+    };
+    const service = new CaseService(prisma, lifecycle, {
+      decorateForRead: jest.fn(async (value) => value),
+    } as any);
+    const result = await service.updateStatus(
+      'case-1',
+      'shop-1',
+      'tech-1',
+      'TECHNICIAN',
+      'request-1',
+      { status: CaseStatus.SUBMITTED },
+    );
+    expect(lifecycle.transition).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        caseId: 'case-1',
+        actorId: 'tech-1',
+        actorRole: 'TECHNICIAN',
+        toState: CaseStatus.SUBMITTED,
+        idempotencyKey: 'request-1',
+      }),
+    );
+    expect(result?.status).toBe(CaseStatus.SUBMITTED);
+  });
+
+  it("returns only the assigned technician's cases and maps persisted records for the workspace", async () => {
+    const now = new Date('2026-11-22T00:00:00.000Z');
+    const prisma: any = {
+      profile: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'tech-1',
+          displayName: 'Technician',
+          shop: { name: 'Repair Shop' },
+        }),
+      },
+      repairCase: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'case-1',
+            caseNumber: 'RP-1',
+            status: CaseStatus.UNDER_DIAGNOSIS,
+            priority: 'NORMAL',
+            customerName: 'Customer',
+            customerEmail: null,
+            problemDescription: 'Device will not charge',
+            createdAt: now,
+            updatedAt: now,
+            technicianId: 'tech-1',
+            technician: { id: 'tech-1', displayName: 'Technician' },
+            device: { make: 'Acme', model: 'Phone 1', serialNumber: 'ABCD', createdAt: now },
+            diagnostics: [
+              {
+                findings: {
+                  symptoms: 'No charge',
+                  findings: 'Port obstructed',
+                  recommendedWork: 'Clean port',
+                  safetyNotes: '',
+                },
+                summary: null,
+              },
+            ],
+            evidence: [
+              { id: 'evidence-1', fileName: 'port.jpg', purpose: 'PHOTOGRAPH', capturedAt: now },
+            ],
+            quotations: [],
+            testResults: [],
+            warranty: null,
+          },
+        ]),
+      },
+    };
+    const service = new CaseService(prisma, {} as any, {} as any);
+    const result = await service.technicianWorkspace('shop-1', 'tech-1', 'TECHNICIAN');
+    expect(prisma.repairCase.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { shopId: 'shop-1', deletedAt: null, technicianId: 'tech-1' },
+      }),
+    );
+    expect(result.technician.organizationName).toBe('Repair Shop');
+    expect(result.cases[0]).toMatchObject({
+      status: 'diagnosing',
+      reference: 'RP-1',
+      diagnostics: { findings: 'Port obstructed' },
+    });
+    expect(result.cases[0].evidence[0]).not.toHaveProperty('url');
+  });
+
+  it('does not query cases when the profile is outside the requested organization', async () => {
+    const prisma: any = {
+      profile: { findFirst: jest.fn().mockResolvedValue(null) },
+      repairCase: { findMany: jest.fn() },
+    };
+    const service = new CaseService(prisma, {} as any, {} as any);
+    await expect(service.technicianWorkspace('other-shop', 'tech-1', 'TECHNICIAN')).rejects.toThrow(
+      'Technician workspace was not found',
+    );
+    expect(prisma.repairCase.findMany).not.toHaveBeenCalled();
   });
 });

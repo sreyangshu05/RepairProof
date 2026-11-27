@@ -1,0 +1,15 @@
+name: Setup RepairProof Node workspace
+description: Install the pinned Node and pnpm versions and restore the locked workspace dependencies.
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 10.19.0
+        run_install: false
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 22
+        cache: pnpm
+    - shell: bash
+      run: pnpm install --frozen-lockfile

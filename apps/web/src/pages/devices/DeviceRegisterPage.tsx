@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, Laptop, Camera, ArrowLeft, Upload, Check } from 'lucide-react';
-import { api } from '../../lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { Smartphone, Laptop, Camera, ArrowLeft } from 'lucide-react';
+import { apiPost, getApiErrorMessage } from '../../lib/api';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -74,7 +80,7 @@ export const DeviceRegisterPage: React.FC = () => {
     setError(null);
 
     try {
-      const device: any = await api.post('/devices', {
+      const device = await apiPost<{ id: string }>('/devices', {
         category,
         make: make.trim(),
         model: model.trim(),
@@ -88,8 +94,8 @@ export const DeviceRegisterPage: React.FC = () => {
 
       // Navigate to create a repair case for this device immediately
       navigate(`/cases/new?deviceId=${device.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to register device');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to register device'));
     } finally {
       setIsSubmitting(false);
     }
@@ -108,7 +114,8 @@ export const DeviceRegisterPage: React.FC = () => {
         <CardHeader>
           <CardTitle>Physical Device Baseline</CardTitle>
           <CardDescription>
-            Document make, model, identifiers, and physical intake condition before diagnostic disassembly.
+            Document make, model, identifiers, and physical intake condition before diagnostic
+            disassembly.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -155,7 +162,9 @@ export const DeviceRegisterPage: React.FC = () => {
                   </div>
                   <div>
                     <p className="font-semibold text-sm">Laptop / PC</p>
-                    <p className="text-xs text-muted-foreground">MacBook, Windows, Linux notebooks</p>
+                    <p className="text-xs text-muted-foreground">
+                      MacBook, Windows, Linux notebooks
+                    </p>
                   </div>
                 </button>
               </div>
@@ -245,7 +254,8 @@ export const DeviceRegisterPage: React.FC = () => {
                 required
               />
               <p className="text-[11px] text-muted-foreground">
-                Documenting pre-existing flaws protects both the repair shop and the customer against liability.
+                Documenting pre-existing flaws protects both the repair shop and the customer
+                against liability.
               </p>
             </div>
 
@@ -254,8 +264,15 @@ export const DeviceRegisterPage: React.FC = () => {
               <Label>Intake Condition Photos (Client-side Compressed)</Label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {photos.map((url, idx) => (
-                  <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border bg-muted">
-                    <img src={url} alt={`Intake ${idx + 1}`} className="w-full h-full object-cover" />
+                  <div
+                    key={idx}
+                    className="relative aspect-square rounded-lg overflow-hidden border bg-muted"
+                  >
+                    <img
+                      src={url}
+                      alt={`Intake ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                    />
                     <button
                       type="button"
                       onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}

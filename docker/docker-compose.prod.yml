@@ -1,0 +1,165 @@
+name: repairproof
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random URL-safe POSTGRES_PASSWORD}
+    volumes:
+      - repairproof-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+    networks: [data]
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set a random URL-safe REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    volumes:
+      - repairproof-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [data]
+
+  clamav:
+    image: clamav/clamav:1.4
+    volumes:
+      - repairproof-clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "echo PING | nc -w 2 127.0.0.1 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+    networks: [data]
+
+  migrate:
+    image: ${IMAGE_PREFIX:-repairproof}/migrate:${IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: build
+    command: ["pnpm", "--filter", "@repairproof/api", "db:migrate:deploy"]
+    user: node
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [data]
+
+  api:
+    image: ${IMAGE_PREFIX:-repairproof}/api:${IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: runner
+    environment:
+      NODE_ENV: production
+      API_PORT: 3001
+      API_TRUST_PROXY_HOPS: ${API_TRUST_PROXY_HOPS:-1}
+      API_CORS_ORIGIN: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL}
+      # Customer decisions use bearer authorization links and remain deliberately
+      # unavailable until the public authorization threat model is approved.
+      CUSTOMER_AUTHORIZATION_ENABLED: "false"
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL}
+      CERTIFICATE_BASE_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}?schema=public
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL for authentication and private evidence storage}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY}
+      EVIDENCE_STORAGE_BUCKET: ${EVIDENCE_STORAGE_BUCKET:-repairproof-evidence}
+      EVIDENCE_MAX_FILE_BYTES: ${EVIDENCE_MAX_FILE_BYTES:-26214400}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
+      REQUIRE_REDIS_RATE_LIMIT: "true"
+      REDIS_POOL_SIZE: ${REDIS_POOL_SIZE:-4}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      METRICS_ENABLED: ${METRICS_ENABLED:-false}
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
+      EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-2555}
+      EVIDENCE_RETENTION_WORKER_ENABLED: ${EVIDENCE_RETENTION_WORKER_ENABLED:-true}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-30000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    networks: [edge, data]
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+
+  web:
+    image: ${IMAGE_PREFIX:-repairproof}/web:${IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        VITE_API_URL: /api
+        VITE_SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY}
+        VITE_APP_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [edge]
+
+  invoice-ai:
+    profiles: ["ai"]
+    image: ${IMAGE_PREFIX:-repairproof}/invoice-ai:${IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: services/ai/invoice-intelligence/Dockerfile
+    environment:
+      REPAIRPROOF_ENV: production
+      INVOICE_AI_INTERNAL_TOKEN: ${INVOICE_AI_INTERNAL_TOKEN:-}
+      INVOICE_AI_SIGNING_SECRET: ${INVOICE_AI_SIGNING_SECRET:-}
+      INVOICE_AI_MAX_DOCUMENT_BYTES: ${INVOICE_AI_MAX_DOCUMENT_BYTES:-10485760}
+      INVOICE_AI_MAX_PDF_PAGES: ${INVOICE_AI_MAX_PDF_PAGES:-5}
+      INVOICE_AI_MAX_CONCURRENT: ${INVOICE_AI_MAX_CONCURRENT:-2}
+    expose:
+      - "8090"
+    mem_limit: 1g
+    cpus: 1.0
+    restart: unless-stopped
+    networks: [data]
+
+volumes:
+  repairproof-postgres-data:
+  repairproof-redis-data:
+  repairproof-clamav-data:
+
+networks:
+  edge:
+  data:
+    internal: true

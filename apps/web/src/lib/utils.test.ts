@@ -15,7 +15,7 @@ describe('Frontend Utils', () => {
   });
 
   it('handles null date gracefully', () => {
-    expect(formatDate(null)).toBe('N/A');
-    expect(formatDate(undefined)).toBe('N/A');
+    expect(formatDate(null)).toBe('Not available');
+    expect(formatDate(undefined)).toBe('Not available');
   });
 });

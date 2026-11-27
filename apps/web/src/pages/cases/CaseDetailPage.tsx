@@ -3,51 +3,149 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ShieldCheck,
-  Smartphone,
-  Laptop,
   Camera,
   Plus,
   Send,
   CheckCircle2,
-  XCircle,
-  Copy,
-  ExternalLink,
   Trash2,
-  Wrench,
-  Clock,
   FileBadge2,
   Check,
-  AlertCircle,
   Pin,
+  ExternalLink,
 } from 'lucide-react';
-import { api } from '../../lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import { api, apiGet, apiPost } from '../../lib/api';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
 import { formatDate, formatCurrency } from '../../lib/utils';
+import { getSupabaseStorageClient } from '../../lib/supabase-storage';
 import {
-  CaseStatus,
-  DeviceCategory,
   EvidenceCategory,
+  EvidencePurpose,
   PartSource,
   QuotationItemType,
   RepairStepStatus,
 } from '@repairproof/shared';
+
+type CaseEvidence = {
+  id: string;
+  type: 'PHOTO' | 'VIDEO' | 'DOCUMENT';
+  category: string;
+  fileUrl?: string | null;
+  fileName: string;
+  description?: string | null;
+  purpose: string;
+  assetRole: string;
+  malwareStatus: string;
+  legacyUnverified: boolean;
+  deletedAt?: string | null;
+  capturedAt: string | Date;
+  contentSha256?: string | null;
+  annotations: Array<{ id: string; x: number; y: number; note: string }>;
+};
+type QuoteEvidence = { evidenceId: string; evidence: CaseEvidence };
+type CaseQuotation = {
+  id: string;
+  version: number;
+  status: string;
+  validUntil: string | Date;
+  items: Array<{
+    id: string;
+    description: string;
+    partSource?: string | null;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+  }>;
+  partsCost: number;
+  laborCost: number;
+  taxRate: number;
+  taxAmount: number;
+  additionalCharges: number;
+  totalCost: number;
+  diagnosedIssue?: string | null;
+  proposedRepair?: string | null;
+  customerResponseNote?: string | null;
+  changeRequests?: Array<{ id: string; requestText: string; status: string }>;
+  evidence?: QuoteEvidence[];
+};
+type ChecklistItem = {
+  id: string;
+  label: string;
+  category: string;
+  passed: boolean;
+  notes?: string;
+};
+type CaseDetail = {
+  id: string;
+  caseNumber: string;
+  status: string;
+  priority: string;
+  customerName: string;
+  customerPhone: string;
+  problemDescription: string;
+  createdAt: string | Date;
+  device?: {
+    category?: string;
+    make?: string;
+    model?: string;
+    serialNumber?: string | null;
+    imei?: string | null;
+  };
+  evidence: CaseEvidence[];
+  quotations: CaseQuotation[];
+  steps: Array<{
+    id: string;
+    stepNumber: number;
+    title: string;
+    description: string;
+    status: string;
+    photos: string[];
+  }>;
+  verification?: { passed: boolean; notes?: string | null } | null;
+  certificate?: {
+    certificateNumber: string;
+    warrantyPeriodMonths: number;
+    warrantyTerms?: string | null;
+    issuedAt: string | Date;
+    qrCodeUrl: string;
+  } | null;
+};
+type VerificationData = {
+  hasVerification: boolean;
+  verification?: { checklist: ChecklistItem[] };
+  defaultChecklist?: ChecklistItem[];
+};
+type CreateQuotationInput = Record<string, unknown>;
+type RepairStepInput = { title: string; description: string; photos: string[] };
+type EvidenceAnnotationInput = { x: number; y: number; note: string };
+type CertificateInput = { warrantyPeriodMonths: number; warrantyTerms: string };
 
 export const CaseDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState('evidence');
-  const [copiedLink, setCopiedLink] = useState(false);
 
   // Evidence state
-  const [evidenceCategory, setEvidenceCategory] = useState<EvidenceCategory>(EvidenceCategory.DIAGNOSTIC);
+  const [evidenceCategory, setEvidenceCategory] = useState<EvidenceCategory>(
+    EvidenceCategory.DIAGNOSTIC,
+  );
+  const [evidencePurpose, setEvidencePurpose] = useState<EvidencePurpose>(
+    EvidencePurpose.PHOTOGRAPH,
+  );
   const [evidenceDescription, setEvidenceDescription] = useState('');
-  const [selectedEvidenceForAnnotation, setSelectedEvidenceForAnnotation] = useState<any | null>(null);
+  const [selectedEvidenceForAnnotation, setSelectedEvidenceForAnnotation] =
+    useState<CaseEvidence | null>(null);
   const [annotationNote, setAnnotationNote] = useState('');
   const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(null);
 
@@ -72,6 +170,13 @@ export const CaseDetailPage: React.FC = () => {
     },
   ]);
   const [laborCost, setLaborCost] = useState(65);
+  const [diagnosedIssue, setDiagnosedIssue] = useState('');
+  const [proposedRepair, setProposedRepair] = useState('');
+  const [additionalCharges, setAdditionalCharges] = useState(0);
+  const [taxPercent, setTaxPercent] = useState(0);
+  const [estimatedCompletionHours, setEstimatedCompletionHours] = useState(24);
+  const [warrantyTerms, setWarrantyTerms] = useState('90 day parts and labor warranty');
+  const [selectedQuoteEvidenceIds, setSelectedQuoteEvidenceIds] = useState<string[]>([]);
 
   // Repair step state
   const [stepTitle, setStepTitle] = useState('');
@@ -79,19 +184,35 @@ export const CaseDetailPage: React.FC = () => {
   const [stepPhotos, setStepPhotos] = useState<string[]>([]);
 
   // Verification state
-  const [verificationItems, setVerificationItems] = useState<any[]>([]);
+  const [verificationItems, setVerificationItems] = useState<ChecklistItem[]>([]);
 
   // Fetch full case data
-  const { data: repairCase, isLoading, refetch } = useQuery<any>({
+  const { data: repairCase, isLoading } = useQuery<CaseDetail>({
     queryKey: ['case', id],
-    queryFn: () => api.get(`/cases/${id}`),
+    queryFn: () => apiGet<CaseDetail>(`/cases/${id}`),
     enabled: !!id,
   });
 
+  React.useEffect(() => {
+    const eligible = (repairCase?.evidence || []).filter(
+      (item) =>
+        ['INTAKE', 'DIAGNOSTIC'].includes(item.category) &&
+        item.assetRole === 'ORIGINAL' &&
+        item.malwareStatus === 'CLEAN' &&
+        item.legacyUnverified === false &&
+        !item.deletedAt,
+    );
+    setSelectedQuoteEvidenceIds((current) =>
+      current.length
+        ? current.filter((id) => eligible.some((item) => item.id === id))
+        : eligible.map((item) => item.id),
+    );
+  }, [repairCase?.id, repairCase?.evidence]);
+
   // Fetch verification details
-  const { data: verificationData } = useQuery<any>({
+  const { data: verificationData } = useQuery<VerificationData>({
     queryKey: ['verification', id],
-    queryFn: () => api.get(`/cases/${id}/verification`),
+    queryFn: () => apiGet<VerificationData>(`/cases/${id}/verification`),
     enabled: !!id,
   });
 
@@ -99,7 +220,7 @@ export const CaseDetailPage: React.FC = () => {
   React.useEffect(() => {
     if (verificationData) {
       if (verificationData.hasVerification) {
-        setVerificationItems(verificationData.verification.checklist);
+        setVerificationItems(verificationData.verification?.checklist ?? []);
       } else if (verificationData.defaultChecklist) {
         setVerificationItems(verificationData.defaultChecklist);
       }
@@ -108,7 +229,47 @@ export const CaseDetailPage: React.FC = () => {
 
   // Upload Evidence Mutation
   const uploadEvidenceMutation = useMutation({
-    mutationFn: (evidenceData: any) => api.post(`/cases/${id}/evidence`, evidenceData),
+    mutationFn: async ({
+      file,
+      category,
+      purpose,
+      description,
+    }: {
+      file: File;
+      category: EvidenceCategory;
+      purpose: EvidencePurpose;
+      description?: string;
+    }) => {
+      const intent = await apiPost<
+        {
+          uploadId: string;
+          evidenceId?: string;
+          bucket?: string;
+          objectPath?: string;
+          uploadToken?: string;
+          alreadyCompleted?: boolean;
+        },
+        Record<string, unknown>
+      >(`/cases/${id}/evidence/upload-intents`, {
+        category,
+        purpose,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        description,
+      });
+      if (intent.alreadyCompleted) return { evidenceId: intent.evidenceId };
+      if (!intent.bucket || !intent.objectPath || !intent.uploadToken)
+        throw new Error('Upload intent is no longer available. Start a new upload.');
+      const { error } = await getSupabaseStorageClient()
+        .storage.from(intent.bucket)
+        .uploadToSignedUrl(intent.objectPath, intent.uploadToken, file, {
+          contentType: file.type,
+          upsert: false,
+        });
+      if (error) throw new Error('The evidence file could not be uploaded. Try again.');
+      return apiPost(`/cases/${id}/evidence/upload-intents/${intent.uploadId}/complete`, {});
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case', id] });
       setEvidenceDescription('');
@@ -117,7 +278,7 @@ export const CaseDetailPage: React.FC = () => {
 
   // Add Pin Annotation Mutation
   const addAnnotationMutation = useMutation({
-    mutationFn: ({ evidenceId, data }: { evidenceId: string; data: any }) =>
+    mutationFn: ({ evidenceId, data }: { evidenceId: string; data: EvidenceAnnotationInput }) =>
       api.post(`/cases/${id}/evidence/${evidenceId}/annotate`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case', id] });
@@ -128,7 +289,7 @@ export const CaseDetailPage: React.FC = () => {
 
   // Create Quotation Mutation
   const createQuotationMutation = useMutation({
-    mutationFn: (quoteData: any) => api.post(`/cases/${id}/quotations`, quoteData),
+    mutationFn: (quoteData: CreateQuotationInput) => api.post(`/cases/${id}/quotations`, quoteData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case', id] });
     },
@@ -144,7 +305,7 @@ export const CaseDetailPage: React.FC = () => {
 
   // Add Repair Step Mutation
   const addStepMutation = useMutation({
-    mutationFn: (stepData: any) => api.post(`/cases/${id}/steps`, stepData),
+    mutationFn: (stepData: RepairStepInput) => api.post(`/cases/${id}/steps`, stepData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case', id] });
       setStepTitle('');
@@ -164,7 +325,8 @@ export const CaseDetailPage: React.FC = () => {
 
   // Submit Verification Mutation
   const submitVerificationMutation = useMutation({
-    mutationFn: (data: any) => api.post(`/cases/${id}/verification`, data),
+    mutationFn: (data: { passed: boolean; checklist: ChecklistItem[]; notes?: string }) =>
+      api.post(`/cases/${id}/verification`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case', id] });
       queryClient.invalidateQueries({ queryKey: ['verification', id] });
@@ -173,51 +335,22 @@ export const CaseDetailPage: React.FC = () => {
 
   // Issue Certificate Mutation
   const issueCertificateMutation = useMutation({
-    mutationFn: (data: any) => api.post(`/cases/${id}/certificate`, data),
+    mutationFn: (data: CertificateInput) => api.post(`/cases/${id}/certificate`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case', id] });
     },
   });
 
-  // Handle client-side evidence photo upload
+  // Preserve original bytes; the API issues a signed private-storage upload intent.
   const handleEvidenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX = 1600;
-        let w = img.width;
-        let h = img.height;
-        if (w > h && w > MAX) {
-          h *= MAX / w;
-          w = MAX;
-        } else if (h > MAX) {
-          w *= MAX / h;
-          h = MAX;
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, w, h);
-        const compressed = canvas.toDataURL('image/jpeg', 0.75);
-
-        uploadEvidenceMutation.mutate({
-          category: evidenceCategory,
-          type: 'PHOTO',
-          fileUrl: compressed,
-          fileName: file.name,
-          fileSize: Math.round(compressed.length * 0.75),
-          mimeType: 'image/jpeg',
-          description: evidenceDescription || undefined,
-        });
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    uploadEvidenceMutation.mutate({
+      file,
+      category: evidenceCategory,
+      purpose: evidencePurpose,
+      description: evidenceDescription || undefined,
+    });
   };
 
   if (isLoading || !repairCase) {
@@ -227,16 +360,6 @@ export const CaseDetailPage: React.FC = () => {
       </div>
     );
   }
-
-  const authUrl = `${window.location.origin}/authorize/${repairCase.authorizationToken}`;
-
-  const copyAuthorizationLink = () => {
-    navigator.clipboard.writeText(authUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
-
-  const latestQuote = repairCase.quotations?.[0];
 
   return (
     <div className="space-y-6">
@@ -259,34 +382,15 @@ export const CaseDetailPage: React.FC = () => {
               {repairCase.device?.make} {repairCase.device?.model}
             </h1>
             <p className="text-xs text-muted-foreground">
-              Customer: <span className="font-semibold text-foreground">{repairCase.customerName}</span> ({repairCase.customerPhone}) • Created {formatDate(repairCase.createdAt)}
+              Customer:{' '}
+              <span className="font-semibold text-foreground">{repairCase.customerName}</span> (
+              {repairCase.customerPhone}) • Created {formatDate(repairCase.createdAt)}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={copyAuthorizationLink}
-              className="text-xs"
-            >
-              {copiedLink ? (
-                <>
-                  <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Copied Link!
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy Customer Authorization Link
-                </>
-              )}
-            </Button>
-
-            <Button asChild variant="outline" size="sm" className="text-xs">
-              <a href={authUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-3.5 w-3.5 mr-1" /> Preview Customer View
-              </a>
-            </Button>
-          </div>
+          <p className="max-w-xs text-xs text-muted-foreground" role="status">
+            Customer authorization links are currently disabled. Quotations cannot be sent for approval until the authorization workflow is enabled.
+          </p>
         </div>
 
         {/* Reported Problem Notice */}
@@ -298,7 +402,10 @@ export const CaseDetailPage: React.FC = () => {
 
       {/* Proof Chain Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid grid-cols-2 sm:grid-cols-5 h-auto p-1.5 gap-1">
+        <TabsList
+          aria-label="Repair case record sections"
+          className="grid grid-cols-2 sm:grid-cols-5 h-auto p-1.5 gap-1"
+        >
           <TabsTrigger value="evidence" className="text-xs py-2">
             1. Diagnostic Evidence ({repairCase.evidence?.length || 0})
           </TabsTrigger>
@@ -322,7 +429,8 @@ export const CaseDetailPage: React.FC = () => {
             <CardHeader>
               <CardTitle>Diagnostic Evidence Engine</CardTitle>
               <CardDescription>
-                Capture photographic fault evidence and annotate defective traces, chips, or fractures.
+                Capture photographic fault evidence and annotate defective traces, chips, or
+                fractures.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -331,24 +439,60 @@ export const CaseDetailPage: React.FC = () => {
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Record New Evidence
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div>
-                    <Label className="text-xs mb-1 block">Category</Label>
+                    <Label htmlFor="evidence-category" className="text-xs mb-1 block">
+                      Category
+                    </Label>
                     <select
+                      id="evidence-category"
                       className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs"
                       value={evidenceCategory}
                       onChange={(e) => setEvidenceCategory(e.target.value as EvidenceCategory)}
                     >
-                      <option value={EvidenceCategory.DIAGNOSTIC}>DIAGNOSTIC (Fault Discovery)</option>
-                      <option value={EvidenceCategory.INTAKE}>INTAKE (Pre-existing Condition)</option>
-                      <option value={EvidenceCategory.DURING_REPAIR}>DURING REPAIR (Board level / Soldering)</option>
-                      <option value={EvidenceCategory.POST_REPAIR}>POST REPAIR (Clean Reassembly)</option>
+                      <option value={EvidenceCategory.DIAGNOSTIC}>
+                        DIAGNOSTIC (Fault Discovery)
+                      </option>
+                      <option value={EvidenceCategory.INTAKE}>
+                        INTAKE (Pre-existing Condition)
+                      </option>
+                      <option value={EvidenceCategory.DURING_REPAIR}>
+                        DURING REPAIR (Board level / Soldering)
+                      </option>
+                      <option value={EvidenceCategory.POST_REPAIR}>
+                        POST REPAIR (Clean Reassembly)
+                      </option>
                     </select>
                   </div>
 
-                  <div className="sm:col-span-2">
-                    <Label className="text-xs mb-1 block">Observation Notes</Label>
+                  <div>
+                    <Label htmlFor="evidence-purpose" className="text-xs mb-1 block">
+                      Evidence purpose
+                    </Label>
+                    <select
+                      id="evidence-purpose"
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs"
+                      value={evidencePurpose}
+                      onChange={(e) => setEvidencePurpose(e.target.value as EvidencePurpose)}
+                    >
+                      <option value={EvidencePurpose.PHOTOGRAPH}>Photograph</option>
+                      <option value={EvidencePurpose.INVOICE}>Invoice</option>
+                      <option value={EvidencePurpose.DIAGNOSTIC_REPORT}>Diagnostic report</option>
+                      <option value={EvidencePurpose.COMPONENT_DOCUMENTATION}>
+                        Component documentation
+                      </option>
+                      <option value={EvidencePurpose.TEST_RESULT}>Test result</option>
+                      <option value={EvidencePurpose.REPAIR_COMPLETION}>Repair completion</option>
+                      <option value={EvidencePurpose.OTHER}>Other</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2 lg:col-span-2">
+                    <Label htmlFor="evidence-description" className="text-xs mb-1 block">
+                      Observation Notes
+                    </Label>
                     <Input
+                      id="evidence-description"
                       placeholder="e.g. Blown backlight capacitor C401, liquid corrosion on power rail..."
                       value={evidenceDescription}
                       onChange={(e) => setEvidenceDescription(e.target.value)}
@@ -358,21 +502,23 @@ export const CaseDetailPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center space-x-3">
-                  <label className="cursor-pointer">
+                  <label htmlFor="case-evidence-upload" className="cursor-pointer">
                     <Button type="button" size="sm" asChild>
                       <span>
-                        <Camera className="h-4 w-4 mr-1.5" /> Select & Upload Photo Evidence
+                        <Camera className="h-4 w-4 mr-1.5" /> Select & Upload Evidence
                       </span>
                     </Button>
                     <input
+                      id="case-evidence-upload"
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/quicktime,application/pdf"
                       className="hidden"
                       onChange={handleEvidenceUpload}
                     />
                   </label>
                   <span className="text-[11px] text-muted-foreground">
-                    Compressed client-side for zero storage bloat.
+                    Original bytes are retained in private storage. Uploads are limited to 25 MB and
+                    gated by MIME and malware checks.
                   </span>
                 </div>
               </div>
@@ -384,14 +530,15 @@ export const CaseDetailPage: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {repairCase.evidence.map((ev: any) => (
+                  {repairCase.evidence.map((ev) => (
                     <div
                       key={ev.id}
                       className="rounded-xl border overflow-hidden bg-card hover:border-primary/50 transition-all shadow-sm"
                     >
                       <div
-                        className="relative aspect-video bg-muted cursor-crosshair overflow-hidden group"
+                        className={`relative aspect-video bg-muted overflow-hidden group ${ev.fileUrl && ev.type === 'PHOTO' ? 'cursor-crosshair' : ''}`}
                         onClick={(e) => {
+                          if (!ev.fileUrl || ev.type !== 'PHOTO') return;
                           const rect = e.currentTarget.getBoundingClientRect();
                           const x = ((e.clientX - rect.left) / rect.width) * 100;
                           const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -399,14 +546,43 @@ export const CaseDetailPage: React.FC = () => {
                           setPendingPin({ x: Math.round(x), y: Math.round(y) });
                         }}
                       >
-                        <img
-                          src={ev.fileUrl}
-                          alt={ev.fileName}
-                          className="w-full h-full object-cover"
-                        />
+                        {ev.fileUrl && ev.type === 'PHOTO' && (
+                          <img
+                            src={ev.fileUrl}
+                            alt={ev.fileName}
+                            className="w-full h-full object-contain"
+                          />
+                        )}
+                        {ev.fileUrl && ev.type === 'VIDEO' && (
+                          <video
+                            src={ev.fileUrl}
+                            controls
+                            preload="metadata"
+                            className="h-full w-full object-contain"
+                          >
+                            Video playback is not supported.
+                          </video>
+                        )}
+                        {ev.fileUrl && ev.type === 'DOCUMENT' && (
+                          <div className="grid h-full place-items-center">
+                            <a
+                              href={ev.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-sm font-medium text-primary underline"
+                            >
+                              Open {ev.fileName}
+                            </a>
+                          </div>
+                        )}
+                        {!ev.fileUrl && (
+                          <div className="grid h-full place-items-center px-5 text-center text-xs text-muted-foreground">
+                            File is private or awaiting a successful malware scan.
+                          </div>
+                        )}
 
                         {/* Existing Pins */}
-                        {ev.annotations?.map((ann: any) => (
+                        {ev.annotations?.map((ann) => (
                           <div
                             key={ann.id}
                             style={{ left: `${ann.x}%`, top: `${ann.y}%` }}
@@ -421,9 +597,11 @@ export const CaseDetailPage: React.FC = () => {
                           </div>
                         ))}
 
-                        <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded backdrop-blur-sm">
-                          Click photo to place pinpoint note
-                        </div>
+                        {ev.fileUrl && ev.type === 'PHOTO' && (
+                          <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded">
+                            Click photo to place pinpoint note
+                          </div>
+                        )}
                       </div>
 
                       <div className="p-3 space-y-1.5 text-xs">
@@ -435,15 +613,32 @@ export const CaseDetailPage: React.FC = () => {
                             {formatDate(ev.capturedAt)}
                           </span>
                         </div>
-                        <p className="font-medium text-foreground">{ev.description || 'Diagnostic inspection record'}</p>
+                        <p className="font-medium text-foreground">
+                          {ev.description || 'Diagnostic inspection record'}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {ev.purpose} · {ev.assetRole} · scan: {ev.malwareStatus}
+                        </p>
+                        {ev.contentSha256 && (
+                          <p className="break-all font-mono text-[9px] text-muted-foreground">
+                            SHA-256 {ev.contentSha256}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground">
+                          A matching hash supports byte integrity only; it does not prove the
+                          content is authentic or truthful.
+                        </p>
 
                         {ev.annotations?.length > 0 && (
                           <div className="mt-2 pt-2 border-t space-y-1">
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase">
                               Defect Pinpoints ({ev.annotations.length})
                             </p>
-                            {ev.annotations.map((ann: any) => (
-                              <p key={ann.id} className="text-[11px] text-foreground flex items-center">
+                            {ev.annotations.map((ann) => (
+                              <p
+                                key={ann.id}
+                                className="text-[11px] text-foreground flex items-center"
+                              >
                                 <span className="h-1.5 w-1.5 rounded-full bg-red-500 mr-1.5" />
                                 {ann.note}
                               </p>
@@ -511,7 +706,8 @@ export const CaseDetailPage: React.FC = () => {
             <CardHeader>
               <CardTitle>Repair Quotation System</CardTitle>
               <CardDescription>
-                Build an itemized, transparent parts and labor quotation. Customer receives a verifiable sign-off link.
+                Build an itemized, transparent parts and labor quotation. Customer receives a
+                verifiable sign-off link.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -521,7 +717,7 @@ export const CaseDetailPage: React.FC = () => {
                   <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                     Quotation History
                   </h4>
-                  {repairCase.quotations.map((q: any) => (
+                  {repairCase.quotations.map((q) => (
                     <div
                       key={q.id}
                       className="p-4 rounded-xl border bg-card flex flex-col md:flex-row md:items-center justify-between gap-4"
@@ -534,10 +730,10 @@ export const CaseDetailPage: React.FC = () => {
                               q.status === 'APPROVED'
                                 ? 'success'
                                 : q.status === 'REJECTED'
-                                ? 'destructive'
-                                : q.status === 'SENT'
-                                ? 'warning'
-                                : 'secondary'
+                                  ? 'destructive'
+                                  : q.status === 'SENT'
+                                    ? 'warning'
+                                    : 'secondary'
                             }
                           >
                             {q.status}
@@ -547,8 +743,21 @@ export const CaseDetailPage: React.FC = () => {
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          {q.items?.length} items • Parts: {formatCurrency(Number(q.partsCost))} • Labor: {formatCurrency(Number(q.laborCost))}
+                          {q.items?.length} items • Parts: {formatCurrency(Number(q.partsCost))} •
+                          Labor: {formatCurrency(Number(q.laborCost))}
                         </p>
+                        {q.diagnosedIssue && (
+                          <p className="max-w-2xl text-xs">
+                            <span className="font-medium">Diagnosed:</span> {q.diagnosedIssue}{' '}
+                            <span className="font-medium">Proposed:</span> {q.proposedRepair}
+                          </p>
+                        )}
+                        {q.changeRequests?.map((request) => (
+                          <p key={request.id} className="text-xs text-primary">
+                            Customer requested: {request.requestText} ·{' '}
+                            {request.status.toLowerCase()}
+                          </p>
+                        ))}
                         {q.customerResponseNote && (
                           <p className="text-xs italic text-foreground pt-1">
                             Customer note: "{q.customerResponseNote}"
@@ -585,6 +794,136 @@ export const CaseDetailPage: React.FC = () => {
                 </h4>
 
                 <div className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <Label htmlFor="quote-diagnosed-issue" className="text-xs">
+                        Diagnosed issue
+                      </Label>
+                      <textarea
+                        id="quote-diagnosed-issue"
+                        value={diagnosedIssue}
+                        onChange={(event) => setDiagnosedIssue(event.target.value)}
+                        maxLength={3000}
+                        className="mt-1 min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm"
+                        placeholder="Record the confirmed fault"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="quote-proposed-repair" className="text-xs">
+                        Proposed repair
+                      </Label>
+                      <textarea
+                        id="quote-proposed-repair"
+                        value={proposedRepair}
+                        onChange={(event) => setProposedRepair(event.target.value)}
+                        maxLength={3000}
+                        className="mt-1 min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm"
+                        placeholder="Describe the work covered by this version"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <Label htmlFor="quote-additional" className="text-xs">
+                        Additional charges
+                      </Label>
+                      <Input
+                        id="quote-additional"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={additionalCharges}
+                        onChange={(event) => setAdditionalCharges(Number(event.target.value))}
+                        className="mt-1 h-9"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="quote-tax-percent" className="text-xs">
+                        Tax rate (%)
+                      </Label>
+                      <Input
+                        id="quote-tax-percent"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={taxPercent}
+                        onChange={(event) => setTaxPercent(Number(event.target.value))}
+                        className="mt-1 h-9"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="quote-completion-hours" className="text-xs">
+                        Estimated completion (hours)
+                      </Label>
+                      <Input
+                        id="quote-completion-hours"
+                        type="number"
+                        min="1"
+                        max="8760"
+                        value={estimatedCompletionHours}
+                        onChange={(event) =>
+                          setEstimatedCompletionHours(Number(event.target.value))
+                        }
+                        className="mt-1 h-9"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="quote-warranty" className="text-xs">
+                      Warranty terms
+                    </Label>
+                    <textarea
+                      id="quote-warranty"
+                      value={warrantyTerms}
+                      onChange={(event) => setWarrantyTerms(event.target.value)}
+                      maxLength={2000}
+                      className="mt-1 min-h-16 w-full rounded-md border border-input bg-background p-2 text-sm"
+                    />
+                  </div>
+                  <fieldset className="rounded-lg border p-3">
+                    <legend className="px-1 text-xs font-semibold">
+                      Supporting evidence (select at least one)
+                    </legend>
+                    {(repairCase.evidence || []).filter(
+                      (item) => ['INTAKE', 'DIAGNOSTIC'].includes(item.category) && !item.deletedAt,
+                    ).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Upload intake or diagnostic evidence before creating this quotation.
+                      </p>
+                    ) : (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {(repairCase.evidence || [])
+                          .filter(
+                            (item) =>
+                              ['INTAKE', 'DIAGNOSTIC'].includes(item.category) && !item.deletedAt,
+                          )
+                          .map((item) => (
+                            <label
+                              key={item.id}
+                              className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-xs"
+                            >
+                              <input
+                                type="checkbox"
+                                aria-label={`Attach ${item.fileName || item.description || 'evidence'} to quotation`}
+                                checked={selectedQuoteEvidenceIds.includes(item.id)}
+                                onChange={(event) =>
+                                  setSelectedQuoteEvidenceIds((current) =>
+                                    event.target.checked
+                                      ? [...current, item.id]
+                                      : current.filter((id) => id !== item.id),
+                                  )
+                                }
+                              />
+                              <span className="truncate">
+                                {item.fileName || item.description || item.id}
+                              </span>
+                              <span className="ml-auto text-muted-foreground">{item.category}</span>
+                            </label>
+                          ))}
+                      </div>
+                    )}
+                  </fieldset>
                   {quoteItems.map((item, idx) => (
                     <div
                       key={idx}
@@ -707,8 +1046,10 @@ export const CaseDetailPage: React.FC = () => {
                     <span className="text-xl font-bold text-foreground">
                       $
                       {(
-                        quoteItems.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0) +
-                        laborCost
+                        (quoteItems.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0) +
+                          laborCost +
+                          additionalCharges) *
+                        (1 + taxPercent / 100)
                       ).toFixed(2)}
                     </span>
                   </div>
@@ -716,11 +1057,25 @@ export const CaseDetailPage: React.FC = () => {
 
                 <div className="flex justify-end space-x-3 pt-2">
                   <Button
-                    disabled={createQuotationMutation.isPending}
+                    disabled={
+                      createQuotationMutation.isPending ||
+                      !diagnosedIssue.trim() ||
+                      !proposedRepair.trim() ||
+                      !warrantyTerms.trim() ||
+                      estimatedCompletionHours < 1 ||
+                      selectedQuoteEvidenceIds.length === 0
+                    }
                     onClick={() =>
                       createQuotationMutation.mutate({
+                        diagnosedIssue,
+                        proposedRepair,
                         items: quoteItems,
                         laborCost,
+                        additionalCharges,
+                        taxRate: taxPercent / 100,
+                        estimatedCompletionHours,
+                        warrantyTerms,
+                        supportingEvidenceIds: selectedQuoteEvidenceIds,
                         validDays: 7,
                       })
                     }
@@ -739,7 +1094,8 @@ export const CaseDetailPage: React.FC = () => {
             <CardHeader>
               <CardTitle>Step-by-Step Repair Execution Tracking</CardTitle>
               <CardDescription>
-                Maintain a progressive audit trail of assembly steps, heat curves, microscopic soldering, and parts fitted.
+                Maintain a progressive audit trail of assembly steps, heat curves, microscopic
+                soldering, and parts fitted.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -750,7 +1106,7 @@ export const CaseDetailPage: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {repairCase.steps.map((st: any) => (
+                  {repairCase.steps.map((st) => (
                     <div
                       key={st.id}
                       className="p-4 rounded-xl border bg-card flex flex-col md:flex-row md:items-start justify-between gap-4"
@@ -791,7 +1147,8 @@ export const CaseDetailPage: React.FC = () => {
                           onClick={() => completeStepMutation.mutate(st.id)}
                           className="shrink-0"
                         >
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-emerald-600" /> Mark Step Complete
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-emerald-600" /> Mark Step
+                          Complete
                         </Button>
                       )}
                     </div>
@@ -806,8 +1163,11 @@ export const CaseDetailPage: React.FC = () => {
                 </h4>
                 <div className="space-y-3">
                   <div>
-                    <Label className="text-xs mb-1 block">Step Title *</Label>
+                    <Label htmlFor="step-title" className="text-xs mb-1 block">
+                      Step Title *
+                    </Label>
                     <Input
+                      id="step-title"
                       placeholder="e.g. Micro-soldering charging port FPC connector"
                       value={stepTitle}
                       onChange={(e) => setStepTitle(e.target.value)}
@@ -816,8 +1176,11 @@ export const CaseDetailPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <Label className="text-xs mb-1 block">Technical Description *</Label>
+                    <Label htmlFor="step-description" className="text-xs mb-1 block">
+                      Technical Description *
+                    </Label>
                     <textarea
+                      id="step-description"
                       rows={2}
                       className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
                       placeholder="Describe technical procedure (e.g., applied lead-free solder paste at 350°C, verified continuity under microscope)..."
@@ -829,7 +1192,9 @@ export const CaseDetailPage: React.FC = () => {
                   <div className="flex justify-end">
                     <Button
                       size="sm"
-                      disabled={!stepTitle.trim() || !stepDescription.trim() || addStepMutation.isPending}
+                      disabled={
+                        !stepTitle.trim() || !stepDescription.trim() || addStepMutation.isPending
+                      }
                       onClick={() =>
                         addStepMutation.mutate({
                           title: stepTitle.trim(),
@@ -853,20 +1218,25 @@ export const CaseDetailPage: React.FC = () => {
             <CardHeader>
               <CardTitle>Post-Repair Verification Checklist</CardTitle>
               <CardDescription>
-                Systematic functional checks tailored for {repairCase.device?.category}. All consequential hardware subsystems must be certified.
+                Systematic functional checks tailored for {repairCase.device?.category}. All
+                consequential hardware subsystems must be certified.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {verificationItems.map((item, idx) => (
-                  <div
+                  <button
+                    type="button"
                     key={item.id}
                     onClick={() => {
-                      const updated = [...verificationItems];
-                      updated[idx].passed = !updated[idx].passed;
-                      setVerificationItems(updated);
+                      setVerificationItems((current) =>
+                        current.map((check, index) =>
+                          index === idx ? { ...check, passed: !check.passed } : check,
+                        ),
+                      );
                     }}
-                    className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                    aria-pressed={item.passed}
+                    className={`w-full min-h-11 p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                       item.passed
                         ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
                         : 'border-border bg-card hover:bg-muted/30'
@@ -888,7 +1258,7 @@ export const CaseDetailPage: React.FC = () => {
                     >
                       <Check className="h-3.5 w-3.5" />
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -896,7 +1266,8 @@ export const CaseDetailPage: React.FC = () => {
                 <div>
                   <span className="text-xs font-semibold">Verification Score: </span>
                   <span className="text-sm font-bold text-foreground">
-                    {verificationItems.filter((i) => i.passed).length} / {verificationItems.length} Subsystems Passed
+                    {verificationItems.filter((i) => i.passed).length} / {verificationItems.length}{' '}
+                    Subsystems Passed
                   </span>
                 </div>
 
@@ -923,7 +1294,8 @@ export const CaseDetailPage: React.FC = () => {
             <CardHeader>
               <CardTitle>Digital Repair Certificate & Passport</CardTitle>
               <CardDescription>
-                Cryptographic, immutable certificate verifiable globally via QR code or public registry.
+                Cryptographic, immutable certificate verifiable globally via QR code or public
+                registry.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -962,13 +1334,17 @@ export const CaseDetailPage: React.FC = () => {
                       <div>
                         <span className="text-muted-foreground">Device Identifiers: </span>
                         <span className="font-mono text-foreground">
-                          {repairCase.device?.serialNumber ? `S/N: ${repairCase.device.serialNumber}` : ''}{' '}
+                          {repairCase.device?.serialNumber
+                            ? `S/N: ${repairCase.device.serialNumber}`
+                            : ''}{' '}
                           {repairCase.device?.imei ? `IMEI: ${repairCase.device.imei}` : ''}
                         </span>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Warranty Terms: </span>
-                        <span className="text-foreground">{repairCase.certificate.warrantyTerms}</span>
+                        <span className="text-foreground">
+                          {repairCase.certificate.warrantyTerms}
+                        </span>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Issued: </span>
@@ -992,7 +1368,10 @@ export const CaseDetailPage: React.FC = () => {
 
                   <div className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
                     <Button asChild size="sm" variant="outline">
-                      <Link to={`/verify/${repairCase.certificate.certificateNumber}`} target="_blank">
+                      <Link
+                        to={`/verify/${repairCase.certificate.certificateNumber}`}
+                        target="_blank"
+                      >
                         <ExternalLink className="h-4 w-4 mr-1.5" /> Open Public Verification Page
                       </Link>
                     </Button>
@@ -1007,7 +1386,8 @@ export const CaseDetailPage: React.FC = () => {
                   <div>
                     <h4 className="font-semibold text-base">Certificate Not Issued Yet</h4>
                     <p className="text-xs text-muted-foreground max-w-md mx-auto mt-1">
-                      Complete all quality verification checklist items above before sealing and issuing the official customer certificate.
+                      Complete all quality verification checklist items above before sealing and
+                      issuing the official customer certificate.
                     </p>
                   </div>
 

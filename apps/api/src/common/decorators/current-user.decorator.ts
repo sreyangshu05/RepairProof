@@ -1,4 +1,4 @@
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import { createParamDecorator, ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Profile } from '@repairproof/shared';
 
 export interface AuthenticatedUser {
@@ -16,3 +16,17 @@ export const CurrentUser = createParamDecorator(
     return data ? user?.[data] : user;
   },
 );
+
+export function requireShopId(user: AuthenticatedUser): string {
+  if (!user.profile?.shopId || user.profile.deletedAt) {
+    throw new ForbiddenException('An active organization membership is required');
+  }
+  return user.profile.shopId;
+}
+
+export function requireProfileId(user: AuthenticatedUser): string {
+  if (!user.profile?.id || user.profile.deletedAt) {
+    throw new ForbiddenException('An active user profile is required');
+  }
+  return user.profile.id;
+}

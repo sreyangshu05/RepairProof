@@ -1,25 +1,17 @@
-/**
- * Repair Case status values.
- * Defines the complete lifecycle of a repair transaction.
- *
- * Valid transitions:
- *   REGISTERED → DIAGNOSING → QUOTED → AWAITING_APPROVAL
- *   AWAITING_APPROVAL → APPROVED | REJECTED
- *   REJECTED → QUOTED (revise)
- *   APPROVED → IN_REPAIR → VERIFYING → CERTIFIED
- *   VERIFYING → IN_REPAIR (failed verification)
- *   Any pre-repair state → CANCELLED
- */
+/** Repair lifecycle states. Edges are enforced by the backend workflow service. */
 export const CaseStatus = {
-  REGISTERED: 'REGISTERED',
-  DIAGNOSING: 'DIAGNOSING',
-  QUOTED: 'QUOTED',
-  AWAITING_APPROVAL: 'AWAITING_APPROVAL',
+  DRAFT: 'DRAFT',
+  SUBMITTED: 'SUBMITTED',
+  UNDER_DIAGNOSIS: 'UNDER_DIAGNOSIS',
+  DIAGNOSIS_COMPLETED: 'DIAGNOSIS_COMPLETED',
+  QUOTATION_PENDING: 'QUOTATION_PENDING',
+  AWAITING_CUSTOMER_APPROVAL: 'AWAITING_CUSTOMER_APPROVAL',
   APPROVED: 'APPROVED',
   REJECTED: 'REJECTED',
   IN_REPAIR: 'IN_REPAIR',
-  VERIFYING: 'VERIFYING',
-  CERTIFIED: 'CERTIFIED',
+  AWAITING_VERIFICATION: 'AWAITING_VERIFICATION',
+  COMPLETED: 'COMPLETED',
+  DISPUTED: 'DISPUTED',
   CANCELLED: 'CANCELLED',
 } as const;
 
@@ -27,28 +19,40 @@ export type CaseStatus = (typeof CaseStatus)[keyof typeof CaseStatus];
 
 /** Map of which status transitions are permitted. */
 export const CASE_STATUS_TRANSITIONS: Record<CaseStatus, readonly CaseStatus[]> = {
-  [CaseStatus.REGISTERED]: [CaseStatus.DIAGNOSING, CaseStatus.CANCELLED],
-  [CaseStatus.DIAGNOSING]: [CaseStatus.QUOTED, CaseStatus.CANCELLED],
-  [CaseStatus.QUOTED]: [CaseStatus.AWAITING_APPROVAL, CaseStatus.CANCELLED],
-  [CaseStatus.AWAITING_APPROVAL]: [
+  [CaseStatus.DRAFT]: [CaseStatus.SUBMITTED, CaseStatus.CANCELLED],
+  [CaseStatus.SUBMITTED]: [CaseStatus.UNDER_DIAGNOSIS, CaseStatus.CANCELLED],
+  [CaseStatus.UNDER_DIAGNOSIS]: [CaseStatus.DIAGNOSIS_COMPLETED, CaseStatus.CANCELLED],
+  [CaseStatus.DIAGNOSIS_COMPLETED]: [CaseStatus.QUOTATION_PENDING, CaseStatus.CANCELLED],
+  [CaseStatus.QUOTATION_PENDING]: [CaseStatus.AWAITING_CUSTOMER_APPROVAL, CaseStatus.CANCELLED],
+  [CaseStatus.AWAITING_CUSTOMER_APPROVAL]: [
     CaseStatus.APPROVED,
     CaseStatus.REJECTED,
     CaseStatus.CANCELLED,
   ],
-  [CaseStatus.APPROVED]: [CaseStatus.IN_REPAIR],
-  [CaseStatus.REJECTED]: [CaseStatus.QUOTED, CaseStatus.CANCELLED],
-  [CaseStatus.IN_REPAIR]: [CaseStatus.VERIFYING],
-  [CaseStatus.VERIFYING]: [CaseStatus.CERTIFIED, CaseStatus.IN_REPAIR],
-  [CaseStatus.CERTIFIED]: [],
+  [CaseStatus.APPROVED]: [CaseStatus.IN_REPAIR, CaseStatus.CANCELLED],
+  [CaseStatus.REJECTED]: [CaseStatus.QUOTATION_PENDING, CaseStatus.CANCELLED],
+  [CaseStatus.IN_REPAIR]: [CaseStatus.AWAITING_VERIFICATION],
+  [CaseStatus.AWAITING_VERIFICATION]: [CaseStatus.COMPLETED, CaseStatus.IN_REPAIR],
+  [CaseStatus.COMPLETED]: [CaseStatus.DISPUTED],
+  [CaseStatus.DISPUTED]: [CaseStatus.COMPLETED],
   [CaseStatus.CANCELLED]: [],
 };
 
 export const UserRole = {
   TECHNICIAN: 'TECHNICIAN',
   SHOP_OWNER: 'SHOP_OWNER',
+  PLATFORM_ADMIN: 'PLATFORM_ADMIN',
 } as const;
 
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
+
+/** Roles that can be assigned inside a shop; platform privileges use UserRole and a separate grant. */
+export const OrganizationRole = {
+  TECHNICIAN: 'TECHNICIAN',
+  SHOP_OWNER: 'SHOP_OWNER',
+} as const;
+
+export type OrganizationRole = (typeof OrganizationRole)[keyof typeof OrganizationRole];
 
 export const DeviceCategory = {
   SMARTPHONE: 'SMARTPHONE',
@@ -73,6 +77,24 @@ export const EvidenceCategory = {
 } as const;
 
 export type EvidenceCategory = (typeof EvidenceCategory)[keyof typeof EvidenceCategory];
+
+export const EvidencePurpose = {
+  PHOTOGRAPH: 'PHOTOGRAPH',
+  INVOICE: 'INVOICE',
+  DIAGNOSTIC_REPORT: 'DIAGNOSTIC_REPORT',
+  COMPONENT_DOCUMENTATION: 'COMPONENT_DOCUMENTATION',
+  TEST_RESULT: 'TEST_RESULT',
+  REPAIR_COMPLETION: 'REPAIR_COMPLETION',
+  OTHER: 'OTHER',
+} as const;
+export type EvidencePurpose = (typeof EvidencePurpose)[keyof typeof EvidencePurpose];
+
+export const EvidenceAssetRole = {
+  ORIGINAL: 'ORIGINAL',
+  THUMBNAIL: 'THUMBNAIL',
+  PROCESSED: 'PROCESSED',
+} as const;
+export type EvidenceAssetRole = (typeof EvidenceAssetRole)[keyof typeof EvidenceAssetRole];
 
 export const QuotationStatus = {
   DRAFT: 'DRAFT',

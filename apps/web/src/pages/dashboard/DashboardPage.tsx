@@ -9,7 +9,6 @@ import {
   ArrowRight,
   Plus,
   AlertCircle,
-  CheckCircle,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -19,30 +18,33 @@ import { formatDate } from '../../lib/utils';
 import { RepairCase, Device } from '@repairproof/shared';
 
 export const DashboardPage: React.FC = () => {
-  const { data: cases = [], isLoading: isLoadingCases } = useQuery<RepairCase[]>({
-    queryKey: ['cases'],
-    queryFn: () => api.get('/cases'),
+  const { data: caseSummary, isLoading: isLoadingCases } = useQuery<{
+    countsByStatus: Record<string, number>;
+    recentCases: RepairCase[];
+  }>({
+    queryKey: ['cases', 'summary'],
+    queryFn: () => api.get('/cases/summary'),
   });
+  const cases = caseSummary?.recentCases ?? [];
 
-  const { data: devices = [], isLoading: isLoadingDevices } = useQuery<Device[]>({
+  const { data: devices = [] } = useQuery<Device[]>({
     queryKey: ['devices'],
     queryFn: () => api.get('/devices'),
   });
 
-  const activeCases = cases.filter(
-    (c) => c.status !== 'CERTIFIED' && c.status !== 'CANCELLED',
-  );
-  const certifiedCases = cases.filter((c) => c.status === 'CERTIFIED');
-  const awaitingApproval = cases.filter((c) => c.status === 'AWAITING_APPROVAL');
+  const counts = caseSummary?.countsByStatus ?? {};
+  const activeCases = Object.entries(counts).reduce((sum, [status, count]) => sum + (status !== 'COMPLETED' && status !== 'CANCELLED' ? count : 0), 0);
+  const certifiedCases = counts.COMPLETED ?? 0;
+  const awaitingApproval = counts.AWAITING_CUSTOMER_APPROVAL ?? 0;
 
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
-      case 'CERTIFIED':
+      case 'COMPLETED':
         return 'success';
       case 'IN_REPAIR':
-      case 'VERIFYING':
+      case 'AWAITING_VERIFICATION':
         return 'info';
-      case 'AWAITING_APPROVAL':
+      case 'AWAITING_CUSTOMER_APPROVAL':
         return 'warning';
       case 'REJECTED':
       case 'CANCELLED':
@@ -57,9 +59,7 @@ export const DashboardPage: React.FC = () => {
       {/* Top Banner & Quick Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Workshop Operations
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Workshop Operations</h1>
           <p className="text-sm text-muted-foreground">
             Overview of active repair orders, evidence capture, and verification workflows.
           </p>
@@ -88,7 +88,7 @@ export const DashboardPage: React.FC = () => {
             <Clock className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeCases.length}</div>
+            <div className="text-2xl font-bold">{activeCases}</div>
             <p className="text-xs text-muted-foreground mt-1">In diagnostic or repair pipeline</p>
           </CardContent>
         </Card>
@@ -101,8 +101,10 @@ export const DashboardPage: React.FC = () => {
             <AlertCircle className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{awaitingApproval.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">Pending customer quotation sign-off</p>
+            <div className="text-2xl font-bold">{awaitingApproval}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Pending customer quotation sign-off
+            </p>
           </CardContent>
         </Card>
 
@@ -114,8 +116,10 @@ export const DashboardPage: React.FC = () => {
             <ShieldCheck className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{certifiedCases.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">Tamper-proof digital certificates issued</p>
+            <div className="text-2xl font-bold">{certifiedCases}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Tamper-proof digital certificates issued
+            </p>
           </CardContent>
         </Card>
 
@@ -158,23 +162,41 @@ export const DashboardPage: React.FC = () => {
               <ClipboardList className="h-10 w-10 text-muted-foreground/50 mx-auto" />
               <p className="text-sm font-medium">No repair cases created yet.</p>
               <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                Start by registering a customer device, documenting intake condition photos, and creating a case.
+                Start by registering a customer device, documenting intake condition photos, and
+                creating a case.
               </p>
               <Button asChild size="sm">
                 <Link to="/devices/register">Register First Device</Link>
               </Button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div
+              role="region"
+              aria-label="Recent repair cases"
+              tabIndex={0}
+              className="overflow-x-auto rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b">
                   <tr>
-                    <th className="px-4 py-3">Case ID</th>
-                    <th className="px-4 py-3">Device</th>
-                    <th className="px-4 py-3">Customer</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3 text-right">Action</th>
+                    <th scope="col" className="px-4 py-3">
+                      Case ID
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Device
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Customer
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">

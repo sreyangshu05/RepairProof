@@ -1,4 +1,13 @@
-import { IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class ChecklistItemDto {
   @IsString()
@@ -18,6 +27,7 @@ export class ChecklistItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   notes?: string;
 }
 
@@ -26,9 +36,12 @@ export class SubmitVerificationDto {
   passed!: boolean;
 
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
   checklist!: ChecklistItemDto[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }

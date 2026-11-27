@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ClipboardList, Plus, Search, ExternalLink } from 'lucide-react';
+import { ClipboardList, Plus, Search } from 'lucide-react';
 import { api } from '../../lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
+import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
@@ -14,32 +14,30 @@ export const CasesPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
-  const { data: cases = [], isLoading } = useQuery<RepairCase[]>({
-    queryKey: ['cases'],
-    queryFn: () => api.get('/cases'),
+  const { data, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery<{
+    items: RepairCase[];
+    nextCursor: string | null;
+  }>({
+    queryKey: ['cases', 'pages', search, statusFilter],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.get('/cases', { params: {
+      limit: 50, cursor: pageParam, search: search.trim() || undefined,
+      status: statusFilter === 'ALL' ? undefined : statusFilter,
+    } }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
+  const cases = data?.pages.flatMap((page) => page.items) ?? [];
 
-  const filtered = cases.filter((c) => {
-    const matchesSearch =
-      c.caseNumber.toLowerCase().includes(search.toLowerCase()) ||
-      c.customerName.toLowerCase().includes(search.toLowerCase()) ||
-      c.customerPhone.toLowerCase().includes(search.toLowerCase()) ||
-      (c.device?.make && c.device.make.toLowerCase().includes(search.toLowerCase())) ||
-      (c.device?.model && c.device.model.toLowerCase().includes(search.toLowerCase()));
-
-    const matchesStatus = statusFilter === 'ALL' || c.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  const filtered = cases;
 
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
-      case 'CERTIFIED':
+      case 'COMPLETED':
         return 'success';
       case 'IN_REPAIR':
-      case 'VERIFYING':
+      case 'AWAITING_VERIFICATION':
         return 'info';
-      case 'AWAITING_APPROVAL':
+      case 'AWAITING_CUSTOMER_APPROVAL':
         return 'warning';
       case 'REJECTED':
       case 'CANCELLED':
@@ -94,29 +92,50 @@ export const CasesPage: React.FC = () => {
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              Loading cases...
-            </div>
+            <div className="py-12 text-center text-sm text-muted-foreground">Loading cases...</div>
           ) : filtered.length === 0 ? (
             <div className="py-12 text-center space-y-3">
               <ClipboardList className="h-10 w-10 text-muted-foreground/50 mx-auto" />
               <p className="text-sm font-medium">No repair cases match your filters.</p>
-              <Button asChild variant="outline" size="sm">
-                <Link to="/cases/new">Create a Case</Link>
-              </Button>
+              {search || statusFilter !== 'ALL' ? (
+                <Button type="button" variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter('ALL'); }}>
+                  Clear filters
+                </Button>
+              ) : (
+                <Button asChild variant="outline" size="sm"><Link to="/cases/new">Create a Case</Link></Button>
+              )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div
+              role="region"
+              aria-label="Repair cases"
+              tabIndex={0}
+              className="overflow-x-auto rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b">
                   <tr>
-                    <th className="px-4 py-3">Case ID</th>
-                    <th className="px-4 py-3">Device</th>
-                    <th className="px-4 py-3">Customer</th>
-                    <th className="px-4 py-3">Problem Summary</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th scope="col" className="px-4 py-3">
+                      Case ID
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Device
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Customer
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Problem Summary
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Status
+                    </th>
+                    <th scope="col" className="px-4 py-3">
+                      Date
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -129,9 +148,7 @@ export const CasesPage: React.FC = () => {
                         <div className="font-medium text-foreground">
                           {c.device ? `${c.device.make} ${c.device.model}` : 'Unknown'}
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {c.device?.category}
-                        </div>
+                        <div className="text-xs text-muted-foreground">{c.device?.category}</div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium">{c.customerName}</div>
@@ -157,6 +174,13 @@ export const CasesPage: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {hasNextPage && (
+            <div className="border-t p-4 text-center">
+              <Button type="button" variant="outline" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+                {isFetchingNextPage ? 'Loading more cases…' : 'Load more cases'}
+              </Button>
             </div>
           )}
         </CardContent>

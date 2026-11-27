@@ -1,0 +1,2 @@
+ALTER TABLE "Profile" ADD COLUMN "locale" TEXT NOT NULL DEFAULT 'en-IN';
+ALTER TABLE "RepairCase" ADD COLUMN "customerLocale" TEXT NOT NULL DEFAULT 'en-IN';

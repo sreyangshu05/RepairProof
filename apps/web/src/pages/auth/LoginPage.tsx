@@ -2,16 +2,23 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheck, Lock, Mail } from 'lucide-react';
 import { useAuthStore } from '../../stores/auth.store';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { getApiErrorMessage } from '../../lib/api';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuthStore();
-  const [email, setEmail] = useState('technician@repairproof.dev');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,8 +29,8 @@ export const LoginPage: React.FC = () => {
     try {
       await login(email, password);
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Login failed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -38,7 +45,8 @@ export const LoginPage: React.FC = () => {
           </div>
           <CardTitle className="text-xl font-bold">RepairProof Technician Portal</CardTitle>
           <CardDescription className="text-xs">
-            Sign in to access your repair workbench, evidence camera tools, and quality certifications.
+            Sign in to access your repair workbench, evidence camera tools, and quality
+            certifications.
           </CardDescription>
         </CardHeader>
         <CardContent>
